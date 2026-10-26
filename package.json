@@ -1,0 +1,14 @@
+{
+  "name": "anjemin-campus-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ANJEMIN full-stack MVP: customer, driver, admin, marketplace, referrals, Google Places",
+  "type": "module",
+  "scripts": {
+    "start": "node server/src/index.js",
+    "dev": "node --watch server/src/index.js",
+    "check": "node --check server/src/index.js && node --check client/app.js",
+    "test": "node --test server/tests/*.test.js"
+  },
+  "engines": {"node": ">=22.13.0"}
+}
