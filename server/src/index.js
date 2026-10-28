@@ -655,8 +655,10 @@ async function serve(req,res){
   const match=routeMatchers.find(r=>r.method===req.method&&r.re.test(pathname));
   if(!match)return json(res,404,{error:'Endpoint tidak tersedia.'});
   if(!['GET','HEAD'].includes(req.method)&&pathname!=='/api/payments/midtrans/notification'){
-   const origin=req.headers.origin,expected=new URL(process.env.APP_URL||`http://localhost:${PORT}`).origin;
-   if(prod && (!origin||origin!==expected))throw apiError('Origin tidak diizinkan.',403);
+   const origin=req.headers.origin;
+   const trustedOrigins=[process.env.APP_URL,...[process.env.VERCEL_URL,process.env.VERCEL_PROJECT_PRODUCTION_URL].filter(Boolean).map(host=>'https://'+host)].filter(Boolean);
+   const allowedOrigins=trustedOrigins.length?trustedOrigins.map(value=>new URL(value).origin):[`http://localhost:${PORT}`];
+   if(prod && (!origin||!allowedOrigins.includes(origin)))throw apiError('Origin tidak diizinkan.',403);
    if(!prod && origin && ![`http://localhost:${PORT}`,`http://127.0.0.1:${PORT}`].includes(origin))throw apiError('Origin tidak diizinkan.',403);
   }
   if(!['GET','HEAD'].includes(req.method)&&!pathname.startsWith('/api/auth/')&&pathname!=='/api/account/profile'){

@@ -19,6 +19,5 @@ export async function GET() {
     mode: production ? 'production' : 'development',
     supportEmail: process.env.SUPPORT_EMAIL || '',
     supportWhatsapp: process.env.SUPPORT_WHATSAPP || '',
-    backendAvailable: !process.env.VERCEL,
   }, { headers: { 'Cache-Control': 'no-store' } });
 }

@@ -2,10 +2,22 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {createPostgresDatabase} from './postgres-db.js';
 
-const folder = path.resolve(process.env.ANJEMIN_DATA_DIR || 'server/data');
-fs.mkdirSync(folder, {recursive:true});
-export const db = new DatabaseSync(path.join(folder,'anjemin.sqlite'));
+const connectionString=process.env.DATABASE_URL;
+const driver=process.env.ANJEMIN_DB_DRIVER||(connectionString||process.env.VERCEL?'postgres':'sqlite');
+export const remoteDatabase=driver!=='sqlite';
+let database;
+if(remoteDatabase){
+ database=createPostgresDatabase({connectionString,driver});
+}else{
+ const folder=path.resolve(process.env.ANJEMIN_DATA_DIR||'server/data');
+ fs.mkdirSync(folder,{recursive:true});
+ database=new DatabaseSync(path.join(folder,'anjemin.sqlite'));
+}
+export const db=database;
+
+function initializeSchema(){
 db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -112,15 +124,6 @@ if(!db.prepare('PRAGMA table_info(listings)').all().some(column=>column.name==='
  db.exec("ALTER TABLE listings ADD COLUMN image_paths TEXT NOT NULL DEFAULT '[]'");
 }
 
-export function seedAdmin({email, username, phone, password, hashPassword}) {
-  if (!email || !username || !phone || !password || password.startsWith('GANTI_')) return;
-  const exists = db.prepare("SELECT id FROM users WHERE role='ADMIN' LIMIT 1").get();
-  if (exists) return;
-  if (password.length < 12) throw new Error('Password admin minimal 12 karakter');
-  db.prepare(`INSERT INTO users (id,full_name,username,email,phone,password_hash,role,referral_code)
-    VALUES (?,?,?,?,?,?,'ADMIN',?)`).run(crypto.randomUUID(),'Pengelola ANJEMIN',username,email,phone,hashPassword(password),'ADM'+crypto.randomBytes(4).toString('hex').toUpperCase());
-  console.log('Akun pengelola pertama berhasil di-bootstrap dari .env');
-}
 
 if(!db.prepare('PRAGMA table_info(service_orders)').all().some(c=>c.name==='payment_required')){
  db.exec('ALTER TABLE service_orders ADD COLUMN payment_required INTEGER NOT NULL DEFAULT 0');
@@ -248,3 +251,36 @@ db.exec(`CREATE TABLE IF NOT EXISTS driver_rules_consents (
  accepted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  PRIMARY KEY(user_id,rules_version)
 )`);
+
+ if(remoteDatabase){
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower ON users(lower(username))');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users(lower(email))');
+  db.exec('CREATE TABLE IF NOT EXISTS stored_files(name TEXT PRIMARY KEY,body BYTEA NOT NULL)');
+ }
+}
+if(remoteDatabase)db.exec('BEGIN IMMEDIATE');
+try{
+ const marker=remoteDatabase?db.prepare("SELECT to_regclass('_anjemin_schema_version') AS relation").get().relation:null;
+ const current=marker?db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get()?.version:null;
+ if(!remoteDatabase||current!==1){
+  initializeSchema();
+  if(remoteDatabase){
+   db.exec('CREATE TABLE IF NOT EXISTS _anjemin_schema_version(version INTEGER PRIMARY KEY)');
+   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(1);
+  }
+ }
+ if(remoteDatabase)db.exec('COMMIT');
+}catch(error){
+ if(remoteDatabase){try{db.exec('ROLLBACK');}catch{}db.close();}
+ throw error;
+}
+
+export function seedAdmin({email, username, phone, password, hashPassword}) {
+  if (!email || !username || !phone || !password || password.startsWith('GANTI_')) return;
+  const exists = db.prepare("SELECT id FROM users WHERE role='ADMIN' LIMIT 1").get();
+  if (exists) return;
+  if (password.length < 12) throw new Error('Password admin minimal 12 karakter');
+  db.prepare(`INSERT INTO users (id,full_name,username,email,phone,password_hash,role,referral_code)
+    VALUES (?,?,?,?,?,?,'ADMIN',?)`).run(crypto.randomUUID(),'Pengelola ANJEMIN',username,email,phone,hashPassword(password),'ADM'+crypto.randomBytes(4).toString('hex').toUpperCase());
+  console.log('Akun pengelola pertama berhasil di-bootstrap dari .env');
+}

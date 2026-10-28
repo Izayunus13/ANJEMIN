@@ -1,11 +1,8 @@
-﻿import fs from 'node:fs';
-import path from 'node:path';
+﻿import {writeStoredFile,readStoredFile,removeStoredFile} from './stored-files.js';
 import {db} from './db.js';
 import {apiError,uuid,sha256} from './security.js';
 
 export const ORDER_MEDIA_LIMIT=3*1024*1024;
-const mediaRoot=path.resolve(process.env.ANJEMIN_UPLOAD_DIR||'server/uploads');
-fs.mkdirSync(mediaRoot,{recursive:true});
 const mediaPattern=/^chat-[a-f0-9-]+\.(png|jpg|webp|gif|mp4|webm)$/;
 export function orderMediaUsage(orderId){
  const used=db.prepare('SELECT COALESCE(SUM(size_bytes),0) total FROM order_message_media WHERE order_id=?').get(orderId).total;
@@ -54,12 +51,12 @@ export function sendOrderChatMessage(orderId,senderId,input){
    .run(orderId,senderId,body||(media.kind==='image'?'Lampiran foto':'Lampiran video'),body?0:1);
   const messageId=Number(inserted.lastInsertRowid);
   if(media){
-   filename='chat-'+uuid()+'.'+media.ext;fs.writeFileSync(path.join(mediaRoot,filename),media.body,{flag:'wx',mode:0o600});
+   filename='chat-'+uuid()+'.'+media.ext;writeStoredFile(filename,media.body);
    db.prepare('INSERT INTO order_message_media(id,message_id,order_id,sender_id,file_path,mime_type,size_bytes,request_key,request_hash) VALUES(?,?,?,?,?,?,?,?,?)')
     .run(uuid(),messageId,orderId,senderId,filename,media.mime,media.body.length,key,requestHash);
   }
   db.exec('COMMIT');return {ok:true,message_id:messageId,media_usage:orderMediaUsage(orderId)};
- }catch(e){db.exec('ROLLBACK');if(filename)fs.rmSync(path.join(mediaRoot,filename),{force:true});throw e;}
+ }catch(e){db.exec('ROLLBACK');if(filename)removeStoredFile(filename);throw e;}
 }
 export function orderChatMessages(orderId,after){
  return db.prepare(`SELECT m.id,m.sender_id,m.body,m.media_only,m.created_at,m.delivered_at,m.read_at,u.username sender_name,a.file_path,a.mime_type,a.size_bytes
@@ -71,8 +68,8 @@ export function loadOrderChatMedia(orderId,filename){
  if(!mediaPattern.test(filename))throw apiError('Media tidak ditemukan.',404);
  const media=db.prepare('SELECT mime_type FROM order_message_media WHERE order_id=? AND file_path=?').get(orderId,filename);
  if(!media)throw apiError('Media tidak ditemukan.',404);
- const location=path.join(mediaRoot,filename);if(!fs.existsSync(location))throw apiError('Media tidak ditemukan.',404);
- return {body:fs.readFileSync(location),type:media.mime_type};
+ const body=readStoredFile(filename);if(!body)throw apiError('Media tidak ditemukan.',404);
+ return {body,type:media.mime_type};
 }
 
 

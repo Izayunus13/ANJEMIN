@@ -31,6 +31,7 @@ export default defineConfig({
       ADMIN_PASSWORD: 'GANTI_TEST_DISABLED',
       NODE_ENV: cloudMode ? 'production' : 'development',
       VERCEL: cloudMode ? '1' : '',
+      ANJEMIN_DB_DRIVER: cloudMode ? 'pglite' : 'sqlite',
     },
   },
 });
