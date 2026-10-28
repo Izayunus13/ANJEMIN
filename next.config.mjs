@@ -7,7 +7,7 @@ const nextConfig = {
   },
   turbopack: { root: process.cwd() },
   outputFileTracingIncludes: {
-    '/*': ['./client/index.html', './server/src/**/*.js', './server/certs/*.crt'],
+    '/*': ['./client/index.html', './server/src/**/*.js', './server/certs/*.crt', './server/src/postgres-worker-entry.cjs', './node_modules/pg*/**/*', './node_modules/postgres-*/**/*', './node_modules/split2/**/*', './node_modules/xtend/**/*'],
   },
 };
 
