@@ -55,7 +55,7 @@ test('Supabase session endpoint is private and does not require the example todo
 });
 
 test('original static assets resolve through Next.js', async ({ request }) => {
-  for (const asset of ['/favicon.svg', '/legacy/app.js', '/anjemin-logo.png', '/public/dashboard-promo-scene.png']) {
+  for (const asset of ['/favicon.svg', '/legacy/app.js', '/legacy/location-picker.js', '/legacy/vendor/leaflet/leaflet.js', '/legacy/vendor/leaflet/leaflet.css', '/anjemin-logo.png', '/public/dashboard-promo-scene.png']) {
     const response = await request.get(asset);
     expect(response.status(), asset).toBe(200);
     expect(response.headers()['content-type']).not.toContain('text/html');

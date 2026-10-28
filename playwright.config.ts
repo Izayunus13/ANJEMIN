@@ -8,7 +8,7 @@ const storage = path.join(os.tmpdir(), 'anjemin-next-e2e-' + process.pid);
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: cloudMode ? 'vercel-access.spec.ts' : 'next-migration.spec.ts',
+  testMatch: cloudMode ? 'vercel-access.spec.ts' : ['next-migration.spec.ts', 'location-picker.spec.ts'],
   fullyParallel: false,
   workers: 1,
   reporter: 'list',

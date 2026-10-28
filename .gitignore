@@ -12,3 +12,5 @@ out/
 test-results/
 playwright-report/
 .vercel
+
+/client/vendor/

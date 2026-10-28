@@ -7,7 +7,7 @@
   "scripts": {
     "start": "next start",
     "dev": "next dev --webpack",
-    "check": "node --check server/src/index.js && node --check client/app.js && node --check scripts/sync-assets.mjs && tsc --noEmit",
+    "check": "node --check server/src/index.js && node --check client/app.js && node --check client/location-picker.js && node --check scripts/sync-assets.mjs && tsc --noEmit",
     "test": "node --test server/tests/*.test.js",
     "assets": "node scripts/sync-assets.mjs",
     "predev": "npm run assets",
@@ -17,7 +17,9 @@
     "start:legacy": "node server/src/index.js",
     "test:e2e": "playwright test",
     "test:vercel": "npm run build && node scripts/test-vercel.mjs",
-    "migrate:postgres": "node scripts/migrate-postgres.mjs"
+    "migrate:postgres": "node scripts/migrate-postgres.mjs",
+    "predev:legacy": "npm run assets",
+    "prestart:legacy": "npm run assets"
   },
   "engines": {
     "node": ">=22.13.0"
@@ -26,6 +28,7 @@
     "@anjemin/legacy-api": "file:server",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
+    "leaflet": "^1.9.4",
     "next": "^16.4.3",
     "pg": "^8.23.1",
     "react": "^19.3.1",

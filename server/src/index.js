@@ -47,7 +47,7 @@ function publicUser(u){return u&&{id:u.id,full_name:u.full_name,username:u.usern
 const MAX_OTP_ATTEMPTS=5;
 const OTP_CODE_TTL_MS=5*60*1000;
 const OTP_VERIFICATION_GRANT_MS=15*60*1000;
-route('GET',/^\/api\/config$/,async(req,res)=>send(res,{brand:'ANJEMIN',paymentMode:paymentMode(),mapsBrowserKey:process.env.GOOGLE_MAPS_BROWSER_KEY||'',mapsEnabled:!!process.env.GOOGLE_MAPS_BROWSER_KEY,placesEnabled:!!process.env.GOOGLE_PLACES_SERVER_KEY,mode:prod?'production':'development',supportEmail:process.env.SUPPORT_EMAIL||'',supportWhatsapp:process.env.SUPPORT_WHATSAPP||''}));
+route('GET',/^\/api\/config$/,async(req,res)=>send(res,{brand:'ANJEMIN',paymentMode:paymentMode(),mapsBrowserKey:process.env.GOOGLE_MAPS_BROWSER_KEY||'',mapsEnabled:true,mapProvider:'openstreetmap',mapTileUrl:process.env.MAP_TILE_URL||'https://tile.openstreetmap.org/{z}/{x}/{y}.png',placesEnabled:!!process.env.GOOGLE_PLACES_SERVER_KEY,mode:prod?'production':'development',supportEmail:process.env.SUPPORT_EMAIL||'',supportWhatsapp:process.env.SUPPORT_WHATSAPP||''}));
 route('POST',/^\/api\/auth\/otp\/request$/,async(req,res)=>{
  rateLimit('otp-ip-'+clientIp(req),8,60);
  const b=await parseJson(req),phone=validatePhone(b.phone);
