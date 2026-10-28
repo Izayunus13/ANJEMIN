@@ -3,3 +3,11 @@ server/data/
 server/uploads/
 node_modules/
 .DS_Store
+.env.*
+!.env.example
+.next/
+out/
+/public/
+*.tsbuildinfo
+test-results/
+playwright-report/

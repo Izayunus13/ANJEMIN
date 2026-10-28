@@ -1,4 +1,4 @@
-// ANJEMIN Frontend — Vanilla JavaScript, berjalan tanpa npm install / bundler.
+// ANJEMIN Frontend — Vanilla JavaScript, dimuat oleh Next.js setelah hidrasi.
 const $=selector=>document.querySelector(selector);
 const esc=(s)=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>'Rp'+Number(n||0).toLocaleString('en-US');
@@ -154,7 +154,7 @@ function render(){
  if(page==='service'&&state.user&&state.serviceChosen){populateVouchers();if(!$('#order-form[data-jastip-form]')){mountMap();if(state.service==='JASTIP'&&state.config?.placesEnabled){const q=$('#place-query');if(q){q.value='makanan';searchPlaces().catch(()=>{});}}}}
  if(page==='referral'&&state.user)populateReferralVouchers();
 }
-function openModal(which,extra={}){cleanupOrderChatReceipts();releaseOrderChatAttachment();clearTimeout(orderChatTimer);releaseListingPhotos();state.modal={which,...extra};renderModal();}
+function openModal(which,extra={}){if(which==='auth'&&state.config?.backendAvailable===false){toast('Layanan akun belum tersedia. Silakan coba lagi nanti.',true);return;}cleanupOrderChatReceipts();releaseOrderChatAttachment();clearTimeout(orderChatTimer);releaseListingPhotos();state.modal={which,...extra};renderModal();}
 let activeConfirmation=null;
 function confirmAction({title='Konfirmasi tindakan',message='',confirmLabel='Lanjutkan',cancelLabel='Kembali',danger=false}={}){
  if(activeConfirmation)return Promise.resolve(false);
@@ -260,7 +260,7 @@ function renderListingModal(){const inside=`<p class="sub">Pasang foto barang as
 }
 function listingDetailHtml(item){if(!item)return '<p>Barang tidak ditemukan.</p>';return `<div class="split">${listingGallery(item,true)}<div><span class="tag">${esc(item.category)}</span><h2 style="font-size:25px;margin:17px 0 7px">${esc(item.title)}</h2><p class="price">${money(item.price)}</p>${identityChip(item.seller_profile)}<p class="small" style="line-height:1.8;white-space:pre-wrap">${esc(item.description)}</p>${state.user?.id!==item.seller_id?`<div class="form-actions"><button class="button" data-buy="${esc(item.id)}">Checkout</button><button class="button secondary" data-negotiate="${esc(item.id)}">Tawar Penjual ${ico('chat','sm')}</button></div>`:'<span class="tag success">Ini lapakmu</span>'}</div></div>`;}
 function dashboardRoute(){if(!state.user)return 'home';if(profileNeeded())return 'profile';return state.user.role==='ADMIN'?'admin':state.user.role==='DRIVER'?'driver':'home';}
-async function authRefresh(){const d=await get('/api/auth/me');state.user=d.user;state.ready=!!d.user?.ready;}
+async function authRefresh(){if(state.config?.backendAvailable===false){state.user=null;state.ready=false;return;}const d=await get('/api/auth/me');state.user=d.user;state.ready=!!d.user?.ready;}
 async function handleLogin(form){const obj=Object.fromEntries(new FormData(form));obj.remember=form.elements.remember.checked;const data=await post('/api/auth/login',obj);try{if(obj.remember)localStorage.setItem('anjemin-login-identifier',obj.identifier.trim());else localStorage.removeItem('anjemin-login-identifier');}catch{}state.user=data.user;state.ready=!!data.user.ready;state.page=dashboardRoute();state.sideHidden=window.innerWidth<760;closeModal();render();toast('Berhasil masuk. Selamat datang! 🎉');setupStream();if(state.page==='driver')loadDriverJobs();if(state.page==='admin')loadAdmin();}
 async function logout(){releaseProfileDraft();await post('/api/auth/logout');headerWalletCache=null;state.user=null;state.ready=false;state.page='home';state.stream?.close();state.stream=null;state.sideHidden=false;clearSignupOtpState();render();openModal('auth');toast('Berhasil keluar dari akun.');}
 async function file64(file){if(!file)throw Error('Pilih foto terlebih dahulu.');if(file.size>4*1024*1024)throw Error('Foto maksimal 4MB.');if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw Error('Format foto harus JPG, PNG, atau WebP.');return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});}
@@ -600,10 +600,10 @@ document.addEventListener('submit',async event=>{
  }catch(e){toast(e.message||'Terjadi kendala. Silakan coba lagi.',true);}
  finally{if(btn?.isConnected){btn.disabled=false;btn.textContent=btn.dataset.old;}if(form.id==='order-message-form')updateOrderChatComposer();}
 });
-async function init(){setTheme(state.theme);try{state.config=await get('/api/config');await authRefresh();}catch(e){console.error(e);toast('Server belum terhubung. Jalankan node server/src/index.js',true);}
+async function init(){setTheme(state.theme);try{state.config=await get('/api/config');await authRefresh();}catch(e){console.error(e);toast('Layanan belum terhubung. Silakan coba lagi nanti.',true);}
  state.page=state.user?dashboardRoute():'home';state.sideHidden=state.user&&window.innerWidth<760?true:state.sideHidden;
  try{
-  render();if(!state.user){state.authTab='login';openModal('auth');}else{setupStream();if(state.page==='driver')loadDriverJobs();if(state.page==='admin')loadAdmin();}
+  render();if(!state.user){if(state.config?.backendAvailable!==false){state.authTab='login';openModal('auth');}}else{setupStream();if(state.page==='driver')loadDriverJobs();if(state.page==='admin')loadAdmin();}
  }finally{window.finishAnjeminBoot?.();}
 }
 setInterval(()=>{if(state.user&&['market-orders','market-history'].includes(state.page)&&!document.hidden)loadMarketOrders({quiet:true});if(state.user?.role==='DRIVER'&&state.ready&&state.page==='driver')loadDriverJobs();if(state.page==='chat'&&state.activeChat&&state.user)loadMessages(state.activeChat);},15000);

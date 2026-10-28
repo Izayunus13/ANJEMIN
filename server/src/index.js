@@ -677,9 +677,12 @@ async function serve(req,res){
  res.writeHead(200,{'Content-Type':type,'Cache-Control':!prod||target.endsWith('index.html')?'no-store':'public, max-age=300','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin'});
  fs.createReadStream(target).pipe(res);
 }
-const server=http.createServer((req,res)=>serve(req,res).catch(err=>{
+export const handleRequest=(req,res)=>serve(req,res).catch(err=>{
  console.error('[SERVER ERROR]',err.message);
  if(!res.headersSent)json(res,err.status||500,{error:err.status?err.message:'Kesalahan server. Periksa terminal.',...(err.code==='PROFILE_INCOMPLETE'?{code:err.code}:{})});
  else if(!res.writableEnded)res.end();
-}));
-server.listen(PORT,()=>console.log(`\n🚀 ANJEMIN running at http://localhost:${PORT}\nRole ADMIN berasal dari .env, bukan dari form signup.\n`));
+});
+if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+ const server=http.createServer(handleRequest);
+ server.listen(PORT,()=>console.log(`\n🚀 ANJEMIN running at http://localhost:${PORT}\nRole ADMIN berasal dari .env, bukan dari form signup.\n`));
+}

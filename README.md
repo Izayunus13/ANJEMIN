@@ -1,5 +1,7 @@
 # ANJEMIN — MVP Full-Stack (Customer · Penganjem · Pengelola)
 
+> **Migrasi Next.js + Supabase:** jalankan `npm ci` lalu `npm run dev`. Build produksi: `npm run build` dan `npm start`. Baca [panduan migrasi](docs/NEXTJS-SUPABASE.md) untuk konfigurasi dan batas API SQLite di Vercel. Panduan server Node lama di bawah masih berlaku melalui `npm run dev:legacy` / `npm run start:legacy`.
+
 **Tagline:** *Mager? Anjemin Aja!*  
 **Watermark:** `by ANJEMINAJA`  
 **Versi:** `0.1.0` — **prototipe fungsional untuk pengembangan lokal**, bukan sistem transportasi komersial siap produksi.
