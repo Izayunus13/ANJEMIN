@@ -446,3 +446,11 @@ html.app-revealing #app,html.app-revealing #modal-root,html.app-revealing #toast
 .payment-qr{text-align:center;margin:18px 0}.payment-qr img{display:block;width:240px;max-width:100%;height:auto;margin:0 auto;background:white;border:12px solid white;border-radius:12px}#market-pending-listings .list-row{gap:12px;flex-wrap:wrap}
 
 .pickup-navigation{display:flex;flex-direction:column;gap:6px;max-width:240px}.pickup-navigation .button{align-self:flex-start}.pickup-navigation>span{font-size:10px;line-height:1.6}
+
+.order-search{margin-top:14px;padding:15px 16px;border:1px solid var(--border);border-radius:14px;background:var(--surface2);max-width:440px}
+.order-search-heading{display:flex;align-items:center;justify-content:space-between;gap:24px;font-size:12px}
+.order-search-clock{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--primary2)}
+.order-search progress{display:block;width:100%;height:6px;margin:10px 0;accent-color:var(--primary2)}
+.order-search p{font-size:11px;line-height:1.7;margin:8px 0;color:var(--muted)}
+.order-search.is-expired{border-color:var(--primary2)}
+.order-search [hidden]{display:none!important}

@@ -69,3 +69,7 @@ Customer dan Penganjem memiliki menu Profil Saya. Akun baru diarahkan untuk meng
 Halaman Jasa Titip Customer memakai tiga tahap: Lokasi belanja, Titipan & antar, lalu Cek pesanan. Customer dapat mencari toko jika pencarian tersedia atau mengisi nama/alamat secara manual. Memilih hasil pencarian hanya mengisi toko, bukan mengirim pesanan. Mengubah nama/alamat toko menghapus identitas dan koordinat hasil pencarian yang sudah tidak sesuai.
 
 GPS pada tahap kedua khusus alamat antar. Alamat dan koordinat toko tetap terpisah dari lokasi Customer. Alamat manual tetap bisa dipakai jika GPS atau pencarian tidak tersedia. Ringkasan mengikuti isian, tarif jasa, dan voucher; harga barang dijelaskan terpisah dari tarif jasa. Customer dapat kembali atau menekan Ubah untuk mengecek detail sebelum Cari Penganjem membuat pesanan melalui API yang sudah ada. Alur ini tetap menggunakan pembayaran simulasi yang berlaku saat ini.
+
+## Countdown pencarian order
+
+Customer menunggu Penganjem selama 3 menit per putaran pada Anjem, Barang dan Jastip. Setelah timeout, tombol Order Ulang memulai pencarian 3 menit lagi untuk pesanan yang sama. Detail dan voucher dipertahankan. Lihat [panduan countdown](ORDER-SEARCH.md).

@@ -16,6 +16,7 @@ import {verifyGatewaySignature} from './payments.js';
 import {withdrawalProviders,sellerBalance,sellerWithdrawals,withdrawMarketSimulation} from './market-withdrawals.js';
 import {identityFor,updateAccountProfile} from './account-profiles.js';
 import {pickupNavigation} from './pickup-navigation.js';
+import {ORDER_SEARCH_MS,searchWindow,retryOrderSearch} from './order-search.js';
 import {orderMediaUsage,sendOrderChatMessage,orderChatMessages,loadOrderChatMedia,orderChatReceipts,pendingOrderChatInbox,acknowledgeOrderChat} from './order-chat.js';
 
 const root=path.resolve('client');
@@ -403,9 +404,10 @@ function orderView(u){return db.prepare(`SELECT o.*,cu.username customer_name,du
   WHERE o.customer_id=? OR o.driver_id=? ORDER BY o.created_at DESC LIMIT 80`).all(u.id,u.id);}
 route('GET',/^\/api\/orders\/mine$/,async(req,res)=>{
  const u=requireUser(req);
- send(res,{orders:orderView(u).map(o=>{
+ const now=Date.now();
+ send(res,{server_time:new Date(now).toISOString(),orders:orderView(u).map(o=>{
   const payment=paymentFor(o.id);
-  return {...o,payment,pickup_navigation:pickupNavigation(u,o,payment),customer_profile:identityFor(o.customer_id),driver_profile:identityFor(o.driver_id)};
+  return {...o,payment,search:searchWindow(o,now),pickup_navigation:pickupNavigation(u,o,payment),customer_profile:identityFor(o.customer_id),driver_profile:identityFor(o.driver_id)};
  })});
 });
 route('POST',/^\/api\/orders$/,async(req,res)=>{
@@ -425,15 +427,28 @@ route('POST',/^\/api\/orders$/,async(req,res)=>{
   db.prepare(`INSERT INTO service_orders(id,customer_id,type,vehicle_type,pickup,destination,pickup_lat,pickup_lng,destination_lat,destination_lng,
   item_name,item_category,item_weight,image_path,place_id,place_name,notes,fare,platform_fee,promo_discount,voucher_id)
   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,u.id,type,vehicleType,pickup,destination,validCoordinate(b.pickup_lat,-90,90),validCoordinate(b.pickup_lng,-180,180),validCoordinate(b.destination_lat,-90,90),validCoordinate(b.destination_lng,-180,180),b.item_name||null,b.item_category||null,b.item_weight?Number(b.item_weight):null,image,b.place_id||null,b.place_name||null,notes,fare,fee,promo,voucher?.id||null);
-  db.prepare('UPDATE service_orders SET payment_required=1 WHERE id=?').run(id);
+  db.prepare('UPDATE service_orders SET payment_required=1,search_expires_at=? WHERE id=?').run(new Date(Date.now()+ORDER_SEARCH_MS).toISOString(),id);
   if(voucher)db.prepare('UPDATE vouchers SET redeemed_order_id=? WHERE id=? AND redeemed_order_id IS NULL').run(id,voucher.id);
   return {id,platform_fee:fee,promo_discount:promo,payable:fare-promo};
  });
- for(const s of subscribers){const driver=db.prepare('SELECT ready,driver_status FROM users WHERE id=?').get(s.userId);
-  if(driver?.ready&&driver.driver_status==='APPROVED')s.res.write(`event: new-order\ndata: ${JSON.stringify({id,type,pickup,destination,fare})}\n\n`);
- }
- send(res,{order:result,message:'Order dibuat. Menunggu driver Ready yang mengambil pesanan.'});
+ notifySearchingOrder({id,type,pickup,destination,fare});
+ send(res,{order:result,message:'Order dibuat. Mencari Penganjem selama 3 menit.'});
 });
+
+function notifySearchingOrder({id,type,pickup,destination,fare}){
+ for(const subscriber of subscribers){
+  const driver=db.prepare('SELECT ready,driver_status FROM users WHERE id=?').get(subscriber.userId);
+  if(driver?.ready&&driver.driver_status==='APPROVED')subscriber.res.write('event: new-order\ndata: '+JSON.stringify({id,type,pickup,destination,fare})+'\n\n');
+ }
+}
+route('POST',/^\/api\/orders\/([\w-]+)\/retry$/,async(req,res,m)=>{
+ const user=requireRole(req,['CUSTOMER','DRIVER']);rateLimit('order-retry-'+user.id,30,1);
+ const body=await parseJson(req);
+ const result=tx(()=>retryOrderSearch(user.id,m[1],body.search_attempt));
+ if(result.renewed)notifySearchingOrder(result.order);
+ send(res,{order:{id:result.order.id,search:searchWindow(result.order)},renewed:result.renewed,message:'Pencarian Penganjem dimulai lagi selama 3 menit.'});
+});
+
 route('POST',/^\/api\/orders\/([\w-]+)\/cancel$/,async(req,res,m)=>{
  const u=requireUser(req);
  const changed=tx(()=>{
@@ -447,7 +462,7 @@ route('POST',/^\/api\/orders\/([\w-]+)\/cancel$/,async(req,res,m)=>{
 });
 route('GET',/^\/api\/driver\/jobs$/,async(req,res)=>{
  const u=requireRole(req,['DRIVER']);if(u.driver_status!=='APPROVED'||!u.ready)return send(res,{orders:[],message:'Aktifkan Ready setelah verifikasi pengelola.'});
- send(res,{orders:db.prepare("SELECT id,customer_id,type,vehicle_type,pickup,destination,pickup_lat,pickup_lng,fare,platform_fee,notes,created_at,item_name,item_category,item_weight,image_path,place_name FROM service_orders WHERE status='OPEN' AND customer_id<>? ORDER BY created_at ASC").all(u.id).map(o=>({...o,customer_profile:identityFor(o.customer_id)}))});
+ send(res,{orders:db.prepare("SELECT id,customer_id,type,vehicle_type,pickup,destination,pickup_lat,pickup_lng,fare,platform_fee,notes,created_at,item_name,item_category,item_weight,image_path,place_name FROM service_orders WHERE status='OPEN' AND customer_id<>? AND (search_expires_at IS NULL OR search_expires_at>?) ORDER BY created_at ASC").all(u.id,new Date().toISOString()).map(o=>({...o,customer_profile:identityFor(o.customer_id)}))});
 });
 route('POST',/^\/api\/driver\/ready$/,async(req,res)=>{
  const u=requireRole(req,['DRIVER']),b=await parseJson(req);
@@ -457,9 +472,9 @@ route('POST',/^\/api\/driver\/ready$/,async(req,res)=>{
 route('POST',/^\/api\/orders\/([\w-]+)\/claim$/,async(req,res,m)=>{
  const u=requireRole(req,['DRIVER']);
  const changed=tx(()=>db.prepare(`UPDATE service_orders SET status='CLAIMED',driver_id=?
-   WHERE id=? AND status='OPEN' AND customer_id<>? AND EXISTS
-   (SELECT 1 FROM users WHERE id=? AND ready=1 AND driver_status='APPROVED')`).run(u.id,m[1],u.id,u.id).changes);
- if(changed!==1)throw apiError('Order sudah diambil driver lain atau kamu sedang Not Ready.',409);
+   WHERE id=? AND status='OPEN' AND customer_id<>? AND (search_expires_at IS NULL OR search_expires_at>?) AND EXISTS
+   (SELECT 1 FROM users WHERE id=? AND ready=1 AND driver_status='APPROVED')`).run(u.id,m[1],u.id,new Date().toISOString(),u.id).changes);
+ if(changed!==1)throw apiError('Order sudah diambil, waktu pencarian habis, atau kamu sedang Not Ready.',409);
  send(res,{ok:true,message:'Order berhasil kamu ambil!'});
 });
 route('POST',/^\/api\/orders\/([\w-]+)\/complete$/,async(req,res,m)=>{

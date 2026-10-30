@@ -394,8 +394,17 @@ async function buyListing(id,price){
  const d=await post(`/api/listings/${id}/buy`,price?{agreed_price:price}:{});closeModal();toast(d.message);state.marketOrderView='BUYER';go('market-orders');
 }
 async function startNego(id){if(!requireLogin())return;const data=await post('/api/chat/start',{listing_id:id});closeModal();state.activeChat=data.conversation_id;go('chat');await loadConversations();await loadMessages(data.conversation_id);}
-async function loadOrders(){if(!state.user)return;try{const d=await get('/api/orders/mine');state.orders=d.orders;paintOrders();if(state.page==='orders')loadWalletSummary();}catch(e){toast(e.message,true);}}
-function paintOrders(){const el=$('#orders-results');if(!el)return;scheduleOrderStamps();el.innerHTML=state.orders.length?state.orders.map(x=>`<div class="list-row"><div><strong>${esc(labels[x.type])}</strong> <span class="tag ${x.status==='COMPLETED'?'success':x.status==='CANCELLED'?'danger':'warning'}">${orderStatus(x.status)}</span>${x.type==='RIDE'?`<p>Kendaraan: ${x.vehicle_type==='MOBIL'?'Mobil':'Motor'}</p>`:''}<p>${esc(x.pickup)} → ${esc(x.destination)}</p><p>Tarif ${money(x.fare)} · Diskon ${money(x.promo_discount)} · ${esc(x.driver_name?'Driver @'+x.driver_name:'Menunggu driver')}</p>${identityChip(x.customer_id===state.user.id?x.driver_profile:x.customer_profile)}</div><div class="actions">${showCompletedStamp(x)?completedOrderStamp():`${paymentActions(x)}${pickupRouteAction(x)}${x.driver_id&&['CLAIMED','COMPLETED'].includes(x.status)?`<button class="button secondary tiny" data-orderchat="${x.id}">${ico('chat','sm')} ${x.customer_id===state.user.id?'Chat Penganjem':'Chat Customer'}</button>`:''}${x.status==='OPEN'&&x.customer_id===state.user.id?`<button class="button outline tiny" data-cancelorder="${x.id}">Batalkan</button>`:''}${x.status==='CLAIMED'&&!x.payment_required&&x.customer_id===state.user.id?`<button class="button tiny" data-completeorder="${x.id}">Selesai</button>`:''}`}<button class="button outline tiny report-order-button" data-reportorder="${x.id}">Laporkan</button></div></div>`).join(''):'<p class="muted small">Belum ada order. Coba pesan layanan pertama kamu.</p>';
+let orderLoadSequence=0;
+async function loadOrders(){
+ if(!state.user)return;const userId=state.user.id,sequence=++orderLoadSequence;
+ try{
+  const d=await get('/api/orders/mine');if(state.user?.id!==userId||sequence!==orderLoadSequence)return;
+  orderSearchServerTime=Date.parse(d.server_time)||Date.now();orderSearchReceivedAt=performance.now();
+  state.orders=d.orders;paintOrders();if(state.page==='orders')loadWalletSummary();
+ }catch(e){if(state.user?.id===userId&&sequence===orderLoadSequence)toast(e.message,true);}
+}
+function paintOrders(){const el=$('#orders-results');if(!el)return;scheduleOrderStamps();el.innerHTML=state.orders.length?state.orders.map(x=>`<div class="list-row"><div><strong>${esc(labels[x.type])}</strong> <span class="tag ${x.status==='COMPLETED'?'success':x.status==='CANCELLED'?'danger':'warning'}">${orderStatus(x.status)}</span>${x.type==='RIDE'?`<p>Kendaraan: ${x.vehicle_type==='MOBIL'?'Mobil':'Motor'}</p>`:''}<p>${esc(x.pickup)} → ${esc(x.destination)}</p><p>Tarif ${money(x.fare)} · Diskon ${money(x.promo_discount)} · ${esc(x.driver_name?'Driver @'+x.driver_name:'Menunggu driver')}</p>${identityChip(x.customer_id===state.user.id?x.driver_profile:x.customer_profile)}${orderSearchHtml(x)}</div><div class="actions">${showCompletedStamp(x)?completedOrderStamp():`${paymentActions(x)}${pickupRouteAction(x)}${x.driver_id&&['CLAIMED','COMPLETED'].includes(x.status)?`<button class="button secondary tiny" data-orderchat="${x.id}">${ico('chat','sm')} ${x.customer_id===state.user.id?'Chat Penganjem':'Chat Customer'}</button>`:''}${x.status==='OPEN'&&x.customer_id===state.user.id?`<button class="button outline tiny" data-cancelorder="${x.id}">Batalkan</button>`:''}${x.status==='CLAIMED'&&!x.payment_required&&x.customer_id===state.user.id?`<button class="button tiny" data-completeorder="${x.id}">Selesai</button>`:''}`}<button class="button outline tiny report-order-button" data-reportorder="${x.id}">Laporkan</button></div></div>`).join(''):'<p class="muted small">Belum ada order. Coba pesan layanan pertama kamu.</p>';
+ startOrderSearchCountdown();
 }
 async function loadDriverJobs(){if(!state.user||state.user.role!=='DRIVER')return;
  try{const data=await get('/api/driver/jobs');state.driverJobs=data.orders;paintDriverJobs();}catch(e){toast(e.message,true);}}
@@ -1717,4 +1726,43 @@ document.addEventListener('click',async event=>{
   if(state.modal?.which==='listing-fee'&&state.modal.id===id)await renderListingFeeModal(id);
   else openModal('listing-fee',{id});
  }catch(error){toast(error.message,true);button.disabled=false;}
+});
+
+let orderSearchTimer=null,orderSearchServerTime=0,orderSearchReceivedAt=0;
+const orderRetryPending=new Set();
+function searchSeconds(order){
+ if(!order.search?.expires_at)return 0;
+ const serverNow=orderSearchServerTime+(performance.now()-orderSearchReceivedAt);
+ return Math.max(0,Math.ceil((Date.parse(order.search.expires_at)-serverNow)/1000));
+}
+function orderSearchHtml(order){
+ if(order.customer_id!==state.user?.id||order.status!=='OPEN'||!order.search)return '';
+ const seconds=searchSeconds(order),expired=seconds===0;
+ return `<section class="order-search ${expired?'is-expired':''}" data-order-search="${esc(order.id)}" aria-label="Pencarian Penganjem"><div class="order-search-heading"><strong>Mencari Penganjem</strong><span class="order-search-clock" role="timer" aria-live="off" aria-label="Sisa waktu mencari Penganjem">${otpClock(seconds)}</span></div><progress max="180" value="${seconds}" aria-label="Waktu pencarian tersisa"></progress><p data-search-message role="status">${expired?'Belum ada Penganjem yang menerima. Tekan Order Ulang untuk mencari lagi selama 3 menit.':'Kami sedang mencari Penganjem. Kamu bisa menunggu di halaman ini.'}</p><button type="button" class="button tiny" data-order-retry="${esc(order.id)}" ${expired?'':'hidden'} ${orderRetryPending.has(order.id)?'disabled':''}>Order Ulang</button></section>`;
+}
+function updateOrderSearchCountdown(){
+ if(state.page!=='orders'||!state.user){clearInterval(orderSearchTimer);orderSearchTimer=null;return;}
+ for(const root of document.querySelectorAll('[data-order-search]')){
+  const order=state.orders.find(o=>o.id===root.dataset.orderSearch);if(!order)continue;
+  const seconds=searchSeconds(order),expired=seconds===0,changed=root.classList.contains('is-expired')!==expired;
+  root.querySelector('[role="timer"]').textContent=otpClock(seconds);
+  root.querySelector('progress').value=seconds;root.classList.toggle('is-expired',expired);
+  const retry=root.querySelector('[data-order-retry]');retry.hidden=!expired;retry.disabled=orderRetryPending.has(order.id);
+  if(changed)root.querySelector('[data-search-message]').textContent=expired?'Belum ada Penganjem yang menerima. Tekan Order Ulang untuk mencari lagi selama 3 menit.':'Kami sedang mencari Penganjem. Kamu bisa menunggu di halaman ini.';
+ }
+}
+function startOrderSearchCountdown(){
+ clearInterval(orderSearchTimer);orderSearchTimer=null;updateOrderSearchCountdown();
+ if(document.querySelector('[data-order-search]'))orderSearchTimer=setInterval(updateOrderSearchCountdown,1000);
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.user&&state.page==='orders')loadOrders();});
+document.addEventListener('click',async event=>{
+ const button=event.target.closest('[data-order-retry]');if(!button||button.disabled)return;
+ const id=button.dataset.orderRetry,order=state.orders.find(o=>o.id===id);if(!order||orderRetryPending.has(id))return;
+ orderRetryPending.add(id);button.disabled=true;
+ try{
+  const result=await post('/api/orders/'+id+'/retry',{search_attempt:order.search.attempt});
+  toast(result.message);
+ }catch(error){toast(error.message,true);}
+ finally{orderRetryPending.delete(id);await loadOrders();}
 });

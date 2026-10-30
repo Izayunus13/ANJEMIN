@@ -262,3 +262,63 @@ for (const role of ['DRIVER', 'CUSTOMER']) {
     expect(errors).toEqual([]);
   });
 }
+
+for (const type of ['RIDE', 'JASTIP', 'DELIVERY']) {
+  test('customer search countdown survives reload and repeats after Order Ulang: ' + type, async ({ page }) => {
+    let now = Date.now(), expires = now + 180000, attempt = 1, retries = 0, claimed = false;
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.clock.install();
+    await page.route('**/api/**', route => {
+      const req = route.request(), path = new URL(req.url()).pathname;
+      let data: any = {};
+      if (path === '/api/config') data = { brand: 'ANJEMIN', mode: 'development', paymentMode: 'SIMULATION' };
+      else if (path === '/api/auth/me') data = { user: { id: 'search-customer', role: 'CUSTOMER', full_name: 'Customer Pencarian', username: 'pencarian', profile_complete: true } };
+      else if (path === '/api/orders/mine') data = { server_time: new Date(now).toISOString(), orders: [{
+        id: 'search-order', customer_id: 'search-customer', type, pickup: 'Gerbang kampus', destination: 'Kos Melati', fare: 10000, platform_fee: 600,
+        status: claimed ? 'CLAIMED' : 'OPEN', driver_id: claimed ? 'driver' : null, payment_required: 1,
+        search: claimed ? null : { expires_at: new Date(expires).toISOString(), attempt, timed_out: now >= expires, remaining_seconds: Math.max(0, Math.ceil((expires - now) / 1000)) },
+      }] };
+      else if (path === '/api/orders/search-order/retry') {
+        expect(req.postDataJSON()).toEqual({ search_attempt: attempt });
+        expect(now).toBeGreaterThanOrEqual(expires);
+        retries++; attempt++; expires = now + 180000;
+        data = { renewed: true, message: 'Pencarian Penganjem dimulai lagi selama 3 menit.' };
+      } else if (path.includes('inbox')) data = { messages: [], has_more: false };
+      else if (path.includes('wallet')) data = { balance: 0, available_balance: 0, available: 0, held: 0, transactions: [] };
+      else if (path.includes('vouchers')) data = { vouchers: [] };
+      return route.fulfill({ json: data });
+    });
+    await page.goto('/');
+    await page.locator('.side-link[data-nav="orders"]').click();
+    let search = page.locator('[data-order-search="search-order"]');
+    await expect(search.getByRole('timer')).toHaveText('03:00');
+    await expect(search.getByRole('button', { name: 'Order Ulang' })).toBeHidden();
+    now += 60000;
+    await page.clock.fastForward(60000);
+    await expect(search.getByRole('timer')).toHaveText('02:00');
+    await page.reload();
+    await page.locator('.side-link[data-nav="orders"]').click();
+    search = page.locator('[data-order-search="search-order"]');
+    await expect(search.getByRole('timer')).toHaveText('02:00');
+    now += 120001;
+    await page.clock.fastForward(120001);
+    await expect(search.getByRole('timer')).toHaveText('00:00');
+    await expect(search.getByRole('button', { name: 'Order Ulang' })).toBeVisible();
+    expect(retries).toBe(0);
+    await search.getByRole('button', { name: 'Order Ulang' }).click();
+    await expect(search.getByRole('timer')).toHaveText('03:00');
+    await expect(search.getByRole('button', { name: 'Order Ulang' })).toBeHidden();
+    now += 180001;
+    await page.clock.fastForward(180001);
+    await expect(search.getByRole('button', { name: 'Order Ulang' })).toBeVisible();
+    await search.getByRole('button', { name: 'Order Ulang' }).click();
+    await expect(search.getByRole('timer')).toHaveText('03:00');
+    expect(retries).toBe(2);
+    claimed = true;
+    await page.locator('[data-action="refresh-orders"]').click();
+    await expect(page.locator('[data-order-search]')).toHaveCount(0);
+    await expect(page.locator('#orders-results')).toContainText('Diambil driver');
+    expect(errors).toEqual([]);
+  });
+}

@@ -143,6 +143,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS listing_fee_payments (
  qr_url TEXT,expires_at TEXT NOT NULL,paid_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`);
 
+
+if(!db.prepare('PRAGMA table_info(service_orders)').all().some(c=>c.name==='search_expires_at')){
+ db.exec('ALTER TABLE service_orders ADD COLUMN search_expires_at TEXT');
+ // Give open orders present during rollout one full search window.
+ db.prepare("UPDATE service_orders SET search_expires_at=? WHERE status='OPEN'").run(new Date(Date.now()+180000).toISOString());
+}
+if(!db.prepare('PRAGMA table_info(service_orders)').all().some(c=>c.name==='search_attempt'))db.exec('ALTER TABLE service_orders ADD COLUMN search_attempt INTEGER NOT NULL DEFAULT 1 CHECK(search_attempt>0)');
+
 // Stable short account numbers for existing and future users.
 db.exec(`
  CREATE TABLE IF NOT EXISTS user_numbers (
@@ -273,11 +281,11 @@ if(remoteDatabase)db.exec('BEGIN IMMEDIATE');
 try{
  const marker=remoteDatabase?db.prepare("SELECT to_regclass('_anjemin_schema_version') AS relation").get().relation:null;
  const current=marker?db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get()?.version:null;
- if(!remoteDatabase||current!==2){
+ if(!remoteDatabase||current!==3){
   initializeSchema();
   if(remoteDatabase){
    db.exec('CREATE TABLE IF NOT EXISTS _anjemin_schema_version(version INTEGER PRIMARY KEY)');
-   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(2);
+   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(3);
   }
  }
  if(remoteDatabase)db.exec('COMMIT');

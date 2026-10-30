@@ -51,7 +51,7 @@ test('PostgreSQL supports accounts, permissions, persistent private media, order
   assert.equal((await call('driver','/api/market/orders/'+reservation.data.item.order_id+'/payment',{})).status,409);
   assert.equal((await call('customer','/api/listings/'+listingId+'/complete',{order_id:reservation.data.item.order_id})).data.fee,0);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM ledger WHERE source_id=?').get(listingId).n,1);
-  assert.equal(db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get().version,2);
+  assert.equal(db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get().version,3);
   const file=saveImage(image,'private');
   db.prepare('UPDATE users SET ktm_path=? WHERE id=?').run(file,'driver');
   assert.equal(db.prepare('SELECT name FROM stored_files WHERE name=?').get(file).name,file);
@@ -62,7 +62,15 @@ test('PostgreSQL supports accounts, permissions, persistent private media, order
   const created=await call('customer','/api/orders',{type:'RIDE',pickup:'Lokasi jemput',destination:'Lokasi tujuan',fare:10000});
   assert.equal(created.status,200,JSON.stringify(created.data));
   const order='/api/orders/'+created.data.order.id;
+  assert.equal((await call('customer',order+'/retry',{search_attempt:1})).status,409);
+  db.prepare("UPDATE service_orders SET search_expires_at='2000-01-01T00:00:00.000Z' WHERE id=?").run(created.data.order.id);
+  assert.equal((await call('driver',order+'/claim',{})).status,409);
+  assert.ok(!(await call('driver','/api/driver/jobs')).data.orders.some(item=>item.id===created.data.order.id));
+  const renewed=await call('customer',order+'/retry',{search_attempt:1});
+  assert.equal(renewed.status,200,JSON.stringify(renewed.data));assert.equal(renewed.data.order.search.attempt,2);
+  assert.equal((await call('customer',order+'/retry',{search_attempt:1})).data.renewed,false);
   assert.equal((await call('driver',order+'/claim',{})).status,200);
+  assert.equal((await call('customer',order+'/retry',{search_attempt:2})).status,409);
   const message=await call('customer',order+'/messages',{body:'Foto lokasi',media:image,request_id:'postgres-media-request-001'});
   assert.equal(message.status,200,JSON.stringify(message.data));
   const messages=await call('driver',order+'/messages');
