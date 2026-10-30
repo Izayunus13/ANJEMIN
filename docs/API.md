@@ -19,11 +19,13 @@ Base URL lokal: `http://localhost:3000/api`. Semua POST mengirim body `Content-T
 | Method | Endpoint | Keterangan |
 |---|---|---|
 | GET | `/account/vouchers` | Voucher milik user |
-| GET | `/listings` | Barang status AVAILABLE |
+| GET | `/listings` | Barang AVAILABLE yang sudah dipublikasikan |
 | GET | `/listings/mine` | Barang milik akun login |
-| POST | `/listings` | `{title,category,price,description,image}` (base64 image Data URI) |
+| POST | `/listings` | `{title,category,price,description,images}`; simpan belum tayang + invoice biaya upload Rp3.000 |
+| GET / POST | `/listings/:id/publication-payment` | Pemilik memeriksa / membuat invoice upload QRIS; invoice yang sama dipakai ulang |
+| POST | `/listings/:id/publication-payment/simulate` | Pemilik menguji pembayaran, hanya simulasi nonproduksi |
 | POST | `/listings/:id/buy` | Reservasi COD; optional `{agreed_price}` jika seller telah offer lewat chat |
-| POST | `/listings/:id/complete` | Seller mengonfirmasi barang terjual, buat ledger |
+| POST | `/listings/:id/complete` | Seller mengonfirmasi COD selesai, tanpa komisi penjualan |
 | POST | `/listings/:id/cancel` | Batalkan reservasi |
 | POST | `/chat/start` | `{listing_id}` membuat / memperoleh conversation |
 | GET | `/chat` | Daftar chat user |

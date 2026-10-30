@@ -26,9 +26,9 @@ Landing → login popup → Daftar → Pilih Customer/Driver → Masukkan nomor 
 
 ## Flow marketplace
 
-Seller upload foto, judul, tipe, harga, keterangan → AVAILABLE → Buyer Beli/Reservasi atau Tawar → Jika tawar, start chat + pesan + penawaran harga → Seller dapat menawarkan nominal deal lewat chat → Buyer reservasi di harga deal → status RESERVED → COD offline → Seller konfirmasi selesai → SOLD dan ledger 3% maksimal Rp20.000.
+Seller isi produk dan foto → lapak belum tayang → bayar QRIS biaya pasang Rp3.000 → pembayaran terverifikasi → AVAILABLE → Buyer chat / tawar / reservasi → RESERVED → bayar langsung atau COD → Seller konfirmasi selesai → SOLD tanpa komisi penjualan.
 
-Batasan: reservasi tidak sama dengan pembayaran, dan komisi masih perlu ditagih; belum ada payment gateway, moderasi otomatis, escrow, atau logistik otomatis dari marketplace.
+Reservasi tidak sama dengan pembayaran barang. ANJEMIN hanya menerima fee upload; harga barang dibayar langsung antara pembeli dan penjual. Panduan QRIS dan kompatibilitas transaksi lama: [marketplace-payments.md](marketplace-payments.md).
 
 ## Rekomendasi tempat Jastip
 

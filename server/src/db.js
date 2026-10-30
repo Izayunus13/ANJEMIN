@@ -132,6 +132,17 @@ if(!db.prepare('PRAGMA table_info(service_orders)').all().some(c=>c.name==='paym
 db.exec("CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, order_id TEXT NOT NULL UNIQUE REFERENCES service_orders(id), mode TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount>=0), status TEXT NOT NULL CHECK(status IN ('CREATING','PENDING','HELD','RELEASED','EXPIRED','FAILED')), qr_url TEXT, expires_at TEXT NOT NULL, paid_at TEXT, released_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)");
 db.exec("CREATE TABLE IF NOT EXISTS wallet_credits (id TEXT PRIMARY KEY, driver_id TEXT NOT NULL REFERENCES users(id), order_id TEXT NOT NULL UNIQUE REFERENCES service_orders(id), payment_id TEXT NOT NULL UNIQUE REFERENCES payments(id), amount INTEGER NOT NULL CHECK(amount>=0), mode TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)");
 
+
+// Existing listings keep their publication; new API uploads explicitly require payment.
+if(!db.prepare('PRAGMA table_info(listings)').all().some(c=>c.name==='publication_required'))db.exec('ALTER TABLE listings ADD COLUMN publication_required INTEGER NOT NULL DEFAULT 0 CHECK(publication_required IN (0,1))');
+db.exec(`CREATE TABLE IF NOT EXISTS listing_fee_payments (
+ id TEXT PRIMARY KEY,listing_id TEXT NOT NULL UNIQUE REFERENCES listings(id),
+ mode TEXT NOT NULL CHECK(mode IN ('SIMULATION','MIDTRANS_SANDBOX','MIDTRANS_LIVE')),
+ amount INTEGER NOT NULL CHECK(amount=3000),
+ status TEXT NOT NULL CHECK(status IN ('CREATING','PENDING','PAID','EXPIRED','FAILED')),
+ qr_url TEXT,expires_at TEXT NOT NULL,paid_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`);
+
 // Stable short account numbers for existing and future users.
 db.exec(`
  CREATE TABLE IF NOT EXISTS user_numbers (
@@ -262,11 +273,11 @@ if(remoteDatabase)db.exec('BEGIN IMMEDIATE');
 try{
  const marker=remoteDatabase?db.prepare("SELECT to_regclass('_anjemin_schema_version') AS relation").get().relation:null;
  const current=marker?db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get()?.version:null;
- if(!remoteDatabase||current!==1){
+ if(!remoteDatabase||current!==2){
   initializeSchema();
   if(remoteDatabase){
    db.exec('CREATE TABLE IF NOT EXISTS _anjemin_schema_version(version INTEGER PRIMARY KEY)');
-   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(1);
+   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(2);
   }
  }
  if(remoteDatabase)db.exec('COMMIT');

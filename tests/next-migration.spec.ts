@@ -130,3 +130,73 @@ test('expired Supabase sessions refresh cookies in both directions and disable c
     else process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = oldKey;
   }
 });
+
+for (const [role, mode] of [['CUSTOMER', 'SIMULATION'], ['DRIVER', 'MIDTRANS_SANDBOX']]) {
+  test('marketplace upload fee is recoverable and gates publication for ' + role, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    let listing: any = null, paid = false, uploads = 0;
+    const qr = 'https://api.sandbox.midtrans.com/v2/qris/fee-fixture/qr-code';
+    const payment = () => ({
+      id: 'fee-fixture', amount: 3000, status: paid ? 'PAID' : 'PENDING', mode,
+      expires_at: new Date(Date.now() + 900000).toISOString(), qr_url: mode === 'SIMULATION' ? null : qr,
+    });
+    await page.route(qr, route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="white"/></svg>' }));
+    await page.route('**/api/**', async route => {
+      const request = route.request(), path = new URL(request.url()).pathname;
+      let data: any = {};
+      if (path === '/api/config') data = { brand: 'ANJEMIN', mode: 'development', paymentMode: mode };
+      else if (path === '/api/auth/me') data = { user: { id: 'seller-fixture', role, username: 'penjual', full_name: 'Penjual Kampus', profile_complete: true, ready: false } };
+      else if (path === '/api/listings' && request.method() === 'POST') {
+        uploads++;
+        const body = request.postDataJSON();
+        expect(body.price).toBe('20000'); expect(body.images).toHaveLength(1);
+        listing = { ...body, id: 'listing-fixture', seller_id: 'seller-fixture', publication_required: 1, status: 'AVAILABLE', image_path: 'test.png' };
+        data = { id: listing.id, fee: 3000, published: false, payment: payment(), message: 'Lapak disimpan. Bayar biaya pasang Rp3.000 agar tayang.' };
+      } else if (path === '/api/listings') data = { listings: paid && listing ? [listing] : [] };
+      else if (path === '/api/listings/mine') data = { listings: listing ? [{ ...listing, publication_payment: payment() }] : [] };
+      else if (path.endsWith('/publication-payment/simulate')) { paid = true; data = { payment: payment(), published: true }; }
+      else if (path.endsWith('/publication-payment')) data = { payment: payment(), published: paid };
+      else if (path.includes('inbox')) data = { messages: [], has_more: false };
+      else if (path.includes('wallet')) data = { balance: 0, available_balance: 0, available: 0, held: 0, transactions: [] };
+      else if (path.includes('vouchers')) data = { vouchers: [] };
+      else if (path.includes('jobs') || path.includes('orders')) data = { orders: [], jobs: [] };
+      await route.fulfill({ json: data });
+    });
+    await page.route('**/api/image/test.png', route => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jXioAAAAASUVORK5CYII=', 'base64') }));
+    await page.goto('/');
+    await page.locator('.service-card[data-service="MARKET"], .service-card[data-driverfilter="MARKET"]').click();
+    await page.locator('[data-action="add-listing"]').first().click();
+    const form = page.locator('#listing-form');
+    await expect(form).toContainText('Biaya upload Rp3.000');
+    await form.locator('[name="title"]').fill('Buku kuliah bekas');
+    await form.locator('[name="price"]').fill('20000');
+    await form.locator('[name="description"]').fill('Buku masih lengkap dan kondisinya bagus.');
+    await form.locator('[name="category"]').selectOption('Buku & Alat Tulis');
+    await form.locator('#listing-photo-picker').setInputFiles({
+      name: 'buku.png', mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jXioAAAAASUVORK5CYII=', 'base64'),
+    });
+    await form.getByRole('button', { name: 'Lanjut bayar Rp3.000' }).click();
+    let dialog = page.getByRole('dialog', { name: 'Biaya pasang lapak' });
+    await expect(dialog.getByRole('heading', { name: 'Rp3.000' })).toBeVisible();
+    await expect(page.locator('#market-results .product-card')).toHaveCount(0);
+    if (mode === 'MIDTRANS_SANDBOX') {
+      await expect(dialog.getByAltText('QRIS biaya pasang lapak Rp3.000')).toHaveAttribute('src', qr);
+      await expect(dialog).toContainText('QRIS uji coba Midtrans');
+      await expect(dialog.locator('[data-listing-fee-simulate]')).toHaveCount(0);
+    } else await expect(dialog).toContainText('Mode simulasi');
+    await dialog.locator('[data-listing-fee-close]').click();
+    await expect(page.locator('#market-pending-listings')).toContainText('Buku kuliah bekas');
+    await page.locator('#market-pending-listings [data-listing-fee]').click();
+    dialog = page.getByRole('dialog', { name: 'Biaya pasang lapak' });
+    await expect(dialog.getByRole('heading', { name: 'Rp3.000' })).toBeVisible();
+    if (mode === 'SIMULATION') await dialog.locator('[data-listing-fee-simulate]').click();
+    else { paid = true; await dialog.getByRole('button', { name: 'Cek status pembayaran' }).click(); }
+    await expect(dialog).toContainText('Lunas');
+    await expect(page.locator('#market-results .product-card')).toHaveCount(1);
+    await expect(page.locator('#market-pending-listings [data-listing-fee]')).toHaveCount(0);
+    expect(uploads).toBe(1);
+    expect(errors).toEqual([]);
+  });
+}

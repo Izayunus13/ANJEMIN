@@ -442,3 +442,5 @@ html.app-revealing #app,html.app-revealing #modal-root,html.app-revealing #toast
 .location-map-pin svg{display:block;width:34px;height:44px}
 .location-map-pin:focus-visible{outline:3px solid var(--primary);outline-offset:4px;border-radius:15px}
 .location-picker-map .leaflet-control-attribution{font-size:10px;max-width:54%;white-space:normal}
+
+.payment-qr{text-align:center;margin:18px 0}.payment-qr img{display:block;width:240px;max-width:100%;height:auto;margin:0 auto;background:white;border:12px solid white;border-radius:12px}#market-pending-listings .list-row{gap:12px;flex-wrap:wrap}

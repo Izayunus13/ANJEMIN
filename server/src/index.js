@@ -11,6 +11,8 @@ import {paymentMode,paymentFor,createPayment,refreshPayment,settlePayment,releas
 import {commissionEntries,profitStatistics} from './analytics.js';
 import {driverAchievements,claimDriverAchievement} from './driver-achievements.js';
 import {requireMarketSimulation,marketPaymentFor,createMarketPayment,payMarketSimulation,cancelMarketPayment,releaseMarketPayment} from './market-payments.js';
+import {LISTING_FEE,publishedListingSQL,listingFeeFor,isListingPublished,requireListingPayments,createListingFee,refreshListingFee,simulateListingFee} from './listing-fees.js';
+import {verifyGatewaySignature} from './payments.js';
 import {withdrawalProviders,sellerBalance,sellerWithdrawals,withdrawMarketSimulation} from './market-withdrawals.js';
 import {identityFor,updateAccountProfile} from './account-profiles.js';
 import {orderMediaUsage,sendOrderChatMessage,orderChatMessages,loadOrderChatMedia,orderChatReceipts,pendingOrderChatInbox,acknowledgeOrderChat} from './order-chat.js';
@@ -181,10 +183,10 @@ route('GET',/^\/api\/image\/([\w.-]+)$/,async(req,res,m)=>{
 route('GET',/^\/api\/listings$/,async(req,res)=>{
  const viewer=currentUser(req);
  const items=db.prepare(`SELECT l.id,l.title,l.category,l.price,l.description,l.image_path,l.image_paths,l.status,l.created_at,u.username seller_name,u.id seller_id
-  FROM listings l JOIN users u ON u.id=l.seller_id WHERE l.status='AVAILABLE' ORDER BY l.created_at DESC LIMIT 100`).all();send(res,{listings:items.map(item=>({...item,seller_profile:viewer?identityFor(item.seller_id):null}))});
+  FROM listings l JOIN users u ON u.id=l.seller_id WHERE l.status='AVAILABLE' AND ${publishedListingSQL} ORDER BY l.created_at DESC LIMIT 100`).all();send(res,{listings:items.map(item=>({...item,seller_profile:viewer?identityFor(item.seller_id):null}))});
 });
 route('GET',/^\/api\/listings\/mine$/,async(req,res)=>{
- const u=requireUser(req);send(res,{listings:db.prepare('SELECT * FROM listings WHERE seller_id=? ORDER BY created_at DESC').all(u.id)});
+ const u=requireUser(req);send(res,{listings:db.prepare('SELECT * FROM listings WHERE seller_id=? ORDER BY created_at DESC').all(u.id).map(item=>({...item,publication_payment:listingFeeFor(item.id)}))});
 });
 route('GET',/^\/api\/market\/orders\/mine$/,async(req,res)=>{
  const u=requireRole(req,['CUSTOMER','DRIVER']),view=new URL(req.url,'http://localhost').searchParams.get('view')||'BUYER';
@@ -197,33 +199,61 @@ route('GET',/^\/api\/market\/orders\/mine$/,async(req,res)=>{
  send(res,{orders:orders.map(o=>({...o,payment:marketPaymentFor(o.id),buyer_profile:identityFor(o.buyer_id),seller_profile:identityFor(o.seller_id)}))});
 });
 route('POST',/^\/api\/listings$/,async(req,res)=>{
- const u=requireRole(req,['CUSTOMER','DRIVER']);rateLimit('listing-'+u.id,25,60);
+ const u=requireRole(req,['CUSTOMER','DRIVER']);rateLimit('listing-'+u.id,25,60);requireListingPayments();
  const b=await parseJson(req),title=limited(b.title,4,100,'Nama barang'),category=limited(b.category,2,30,'Kategori'),price=amount(b.price,1000,100000000),description=limited(b.description,10,2000,'Keterangan');
  const images=b.images===undefined?(b.image?[b.image]:[]):b.images;
  if(!Array.isArray(images)||images.length<1||images.length>5||images.some(image=>typeof image!=='string'))throw apiError('Lampirkan 1 sampai 5 foto barang.');
  if(images.reduce((total,image)=>total+image.length,0)>5600000)throw apiError('Total ukuran foto maksimal 4MB.');
  if(category.toLowerCase().startsWith('asap'))throw apiError('Kategori Asap belum dibuka pada versi awal; memerlukan moderasi dan kepatuhan barang terbatas.',403);
- const paths=images.map(image=>saveImage(image));const id=uuid();
- db.prepare('INSERT INTO listings(id,seller_id,title,category,price,description,image_path,image_paths) VALUES(?,?,?,?,?,?,?,?)').run(id,u.id,title,category,price,description,paths[0],JSON.stringify(paths));
- send(res,{id,message:'Barang berhasil dipasang.'});
+ const paths=[],id=uuid();
+ try{
+  for(const image of images)paths.push(saveImage(image));
+  db.prepare('INSERT INTO listings(id,seller_id,title,category,price,description,image_path,image_paths,publication_required) VALUES(?,?,?,?,?,?,?,?,1)').run(id,u.id,title,category,price,description,paths[0],JSON.stringify(paths));
+ }catch(error){for(const name of paths)removeImage(name);throw error;}
+ let paymentError=null;
+ try{await createListingFee(db.prepare('SELECT * FROM listings WHERE id=?').get(id));}
+ catch(error){paymentError=error.message;}
+ send(res,{id,fee:LISTING_FEE,payment:listingFeeFor(id),paymentError,published:isListingPublished(db.prepare('SELECT * FROM listings WHERE id=?').get(id)),message:'Lapak disimpan. Bayar biaya pasang Rp3.000 agar produk tayang di Marketplace.'});
+});
+
+function ownedListing(req,id){
+ const u=requireRole(req,['CUSTOMER','DRIVER']),item=db.prepare('SELECT * FROM listings WHERE id=? AND seller_id=?').get(id,u.id);
+ if(!item)throw apiError('Lapak tidak ditemukan.',404);
+ return item;
+}
+route('GET',/^\/api\/listings\/([\w-]+)\/publication-payment$/,async(req,res,m)=>{
+ const item=ownedListing(req,m[1]);let payment=listingFeeFor(item.id),paymentError=null;
+ try{await refreshListingFee(payment);}catch(error){paymentError=error.message;}
+ payment=listingFeeFor(item.id);send(res,{payment,published:isListingPublished(item),paymentError});
+});
+route('POST',/^\/api\/listings\/([\w-]+)\/publication-payment$/,async(req,res,m)=>{
+ const item=ownedListing(req,m[1]);
+ if(!item.publication_required)throw apiError('Lapak ini sudah dipublikasikan.',409);
+ let paymentError=null;
+ try{await createListingFee(item);}catch(error){if(!listingFeeFor(item.id))throw error;paymentError=error.message;}
+ send(res,{payment:listingFeeFor(item.id),published:isListingPublished(item),paymentError});
+});
+route('POST',/^\/api\/listings\/([\w-]+)\/publication-payment\/simulate$/,async(req,res,m)=>{
+ const item=ownedListing(req,m[1]),p=listingFeeFor(item.id);
+ await simulateListingFee(p);
+ send(res,{payment:listingFeeFor(item.id),published:true,message:'Simulasi berhasil. Lapak sudah tayang; tidak ada uang sungguhan yang ditagih.'});
 });
 route('POST',/^\/api\/listings\/([\w-]+)\/buy$/,async(req,res,m)=>{
- const u=requireRole(req,['CUSTOMER','DRIVER']);const b=await parseJson(req);requireMarketSimulation();
+ const u=requireRole(req,['CUSTOMER','DRIVER']);const b=await parseJson(req);
  const row=tx(()=>{
   const item=db.prepare('SELECT * FROM listings WHERE id=?').get(m[1]);
-  if(!item)throw apiError('Produk tidak ada.',404);if(item.seller_id===u.id)throw apiError('Tidak dapat membeli barang sendiri.');
+  if(!isListingPublished(item))throw apiError('Produk tidak ada.',404);if(item.seller_id===u.id)throw apiError('Tidak dapat membeli barang sendiri.');
   const price=b.agreed_price?amount(b.agreed_price,1000,100000000):item.price;
   if(price!==item.price){const conv=db.prepare('SELECT id FROM conversations WHERE listing_id=? AND buyer_id=?').get(item.id,u.id);
     if(!conv||!db.prepare('SELECT id FROM messages WHERE conversation_id=? AND sender_id=? AND offer_amount=?').get(conv.id,item.seller_id,price))throw apiError('Harga tawar harus disetujui penjual melalui chat.');}
   const change=db.prepare("UPDATE listings SET status='RESERVED',buyer_id=?,agreed_price=? WHERE id=? AND status='AVAILABLE'").run(u.id,price,item.id);
   if(change.changes!==1)throw apiError('Barang sudah dipesan orang lain.',409);
   const orderId=uuid();
-  db.prepare("INSERT INTO market_orders(id,listing_id,buyer_id,seller_id,title,category,image_path,amount,status,payment_required) VALUES(?,?,?,?,?,?,?,?,'RESERVED',1)")
+  db.prepare("INSERT INTO market_orders(id,listing_id,buyer_id,seller_id,title,category,image_path,amount,status,payment_required) VALUES(?,?,?,?,?,?,?,?,'RESERVED',0)")
    .run(orderId,item.id,u.id,item.seller_id,item.title,item.category,item.image_path,price);
   db.prepare('INSERT OR IGNORE INTO conversations(id,listing_id,buyer_id,seller_id) VALUES(?,?,?,?)').run(uuid(),item.id,u.id,item.seller_id);
-  createMarketPayment(db.prepare('SELECT * FROM market_orders WHERE id=?').get(orderId));
   return {id:item.id,order_id:orderId,agreed_price:price};
- });send(res,{item:row,message:'Checkout berhasil. Bayar lewat website; dana ditahan sampai kamu mengonfirmasi barang diterima.'});
+ });send(res,{item:row,message:'Reservasi berhasil. Hubungi penjual lewat chat untuk pembayaran langsung atau COD.'});
 });
 route('POST',/^\/api\/listings\/([\w-]+)\/complete$/,async(req,res,m)=>{
  const u=requireUser(req),b=await parseJson(req);
@@ -236,10 +266,8 @@ route('POST',/^\/api\/listings\/([\w-]+)\/complete$/,async(req,res,m)=>{
   if(order?.payment_required)throw apiError('Transaksi ini memakai pembayaran website. Penjual menandai serah terima, lalu pembeli yang mengonfirmasi selesai.',409);
   db.prepare("UPDATE listings SET status='SOLD' WHERE id=?").run(item.id);
   if(order)db.prepare("UPDATE market_orders SET status='SOLD',completed_at=CURRENT_TIMESTAMP WHERE id=?").run(order.id);
-  const fee=Math.min(Math.round(item.agreed_price*.03),20000);
-  db.prepare("INSERT INTO ledger(id,source_type,source_id,gross_fee,promo_cost,mode) VALUES(?,'MARKET',?,?,0,?)").run(uuid(),item.id,fee,paymentMode()==='DISABLED'?'LEGACY':paymentMode());
-  return {fee};
- });send(res,{message:'Penjualan dicatat selesai. Komisi masih tercatat sebagai kewajiban, belum otomatis diterima platform.',...out});
+  return {fee:0};
+ });send(res,{message:'Transaksi selesai. Pembayaran barang langsung antara pembeli dan penjual, tanpa komisi penjualan.',...out});
 });
 route('POST',/^\/api\/listings\/([\w-]+)\/cancel$/,async(req,res,m)=>{
  const u=requireUser(req),b=await parseJson(req);
@@ -263,7 +291,9 @@ route('GET',/^\/api\/market\/orders\/([\w-]+)\/payment$/,async(req,res,m)=>{
  const order=accessibleMarketOrder(req,m[1]);send(res,{payment:marketPaymentFor(order.id)});
 });
 route('POST',/^\/api\/market\/orders\/([\w-]+)\/payment$/,async(req,res,m)=>{
- const payment=tx(()=>createMarketPayment(accessibleMarketOrder(req,m[1],'buyer_id')));send(res,{payment});
+ const order=accessibleMarketOrder(req,m[1],'buyer_id');
+ if(!order.payment_required||!marketPaymentFor(order.id))throw apiError('Pembayaran barang dilakukan langsung melalui chat atau COD.',409);
+ const payment=tx(()=>createMarketPayment(order));send(res,{payment});
 });
 route('POST',/^\/api\/market\/orders\/([\w-]+)\/payment\/simulate$/,async(req,res,m)=>{
  const payment=tx(()=>payMarketSimulation(accessibleMarketOrder(req,m[1],'buyer_id')));
@@ -297,7 +327,7 @@ route('POST',/^\/api\/market\/withdrawals$/,async(req,res)=>{
 });
 route('POST',/^\/api\/chat\/start$/,async(req,res)=>{
  const u=requireRole(req,['CUSTOMER','DRIVER']),b=await parseJson(req),listing=db.prepare('SELECT * FROM listings WHERE id=?').get(b.listing_id);
- if(!listing)throw apiError('Barang tidak ditemukan.',404);if(listing.seller_id===u.id)throw apiError('Tidak dapat chat diri sendiri.');
+ if(!isListingPublished(listing))throw apiError('Barang tidak ditemukan.',404);if(listing.seller_id===u.id)throw apiError('Tidak dapat chat diri sendiri.');
  let conv=db.prepare('SELECT id FROM conversations WHERE listing_id=? AND buyer_id=?').get(listing.id,u.id);
  if(!conv){const id=uuid();db.prepare('INSERT INTO conversations(id,listing_id,buyer_id,seller_id) VALUES(?,?,?,?)').run(id,listing.id,u.id,listing.seller_id);conv={id};}
  send(res,{conversation_id:conv.id});
@@ -482,7 +512,16 @@ route('POST',/^\/api\/orders\/([\w-]+)\/payment\/simulate$/,async(req,res,m)=>{
  send(res,{payment:paymentFor(o.id)});
 });
 route('POST',/^\/api\/payments\/midtrans\/notification$/,async(req,res)=>{
- const body=await parseJson(req),p=verifyNotification(body);
+ const body=await parseJson(req);
+ const uploadPayment=db.prepare('SELECT * FROM listing_fee_payments WHERE id=?').get(String(body.order_id||''));
+ if(uploadPayment){
+  if(!uploadPayment.mode.startsWith('MIDTRANS'))throw apiError('Notifikasi tidak valid.',403);
+  verifyGatewaySignature(body);
+  // Recheck the authenticated gateway: the signature alone does not cover transaction_status.
+  await refreshListingFee(uploadPayment);
+  send(res,{ok:true});return;
+ }
+ const p=verifyNotification(body);
  if(tx(()=>storeGatewayStatus(p,body)))notifyPayment(p.order_id,'Pembayaran diterima. Dana masih tertahan.');
  send(res,{ok:true});
 });

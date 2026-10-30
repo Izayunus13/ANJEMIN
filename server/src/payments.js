@@ -23,11 +23,11 @@ export function releasePayment(o){
  db.prepare("UPDATE payments SET status='RELEASED',released_at=CURRENT_TIMESTAMP WHERE id=?").run(p.id);
  return p;
 }
-function base(mode){return mode==='MIDTRANS_LIVE'?'https://api.midtrans.com':'https://api.sandbox.midtrans.com';}
-async function gateway(mode,endpoint,body){
+export function paymentGatewayBase(mode){return mode==='MIDTRANS_LIVE'?'https://api.midtrans.com':'https://api.sandbox.midtrans.com';}
+export async function gateway(mode,endpoint,body){
  if(!process.env.MIDTRANS_SERVER_KEY)throw apiError('Server key Midtrans belum dikonfigurasi.',503);
  let response;
- try{response=await fetch(base(mode)+endpoint,{method:body?'POST':'GET',headers:{Authorization:'Basic '+Buffer.from(process.env.MIDTRANS_SERVER_KEY+':').toString('base64'),'Content-Type':'application/json',Accept:'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});}
+ try{response=await fetch(paymentGatewayBase(mode)+endpoint,{method:body?'POST':'GET',headers:{Authorization:'Basic '+Buffer.from(process.env.MIDTRANS_SERVER_KEY+':').toString('base64'),'Content-Type':'application/json',Accept:'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});}
  catch{throw apiError('Gateway belum merespons. Gunakan Cek status; jangan bayar dua kali.',502);}
  const data=await response.json();
  if(!response.ok||!['200','201','202'].includes(String(data.status_code)))throw apiError('Transaksi belum tersedia di Midtrans. Hubungi pengelola untuk memeriksa konfigurasi.',502);
@@ -51,8 +51,8 @@ export function storeGatewayStatus(p,data){
  if(data.order_id!==p.id||Number(data.gross_amount)!==p.amount||data.payment_type!=='qris'||data.currency!=='IDR')throw apiError('Rincian pembayaran tidak sesuai.',409);
  if(['HELD','RELEASED'].includes(paymentFor(p.order_id).status))return false;
  let qr=data.actions?.find(a=>a.name==='generate-qr-code')?.url;
- if(!qr&&data.transaction_id)qr=base(p.mode)+'/v2/qris/'+encodeURIComponent(data.transaction_id)+'/qr-code';
- if(qr&&new URL(qr).origin!==base(p.mode))throw apiError('Alamat QR tidak valid.',502);
+ if(!qr&&data.transaction_id)qr=paymentGatewayBase(p.mode)+'/v2/qris/'+encodeURIComponent(data.transaction_id)+'/qr-code';
+ if(qr&&new URL(qr).origin!==paymentGatewayBase(p.mode))throw apiError('Alamat QR tidak valid.',502);
  const status=data.transaction_status;
  if(status==='settlement'&&(!data.fraud_status||data.fraud_status==='accept'))return settlePayment(p.id);
  const next=status==='expire'?'EXPIRED':['deny','cancel','failure'].includes(status)?'FAILED':'PENDING';
@@ -70,7 +70,11 @@ export async function refreshPayment(p){
 export function verifyNotification(body){
  const p=db.prepare('SELECT * FROM payments WHERE id=?').get(String(body.order_id||''));
  if(!p||!p.mode.startsWith('MIDTRANS')||!process.env.MIDTRANS_SERVER_KEY)throw apiError('Notifikasi tidak valid.',403);
+ verifyGatewaySignature(body);
+ return p;
+}
+export function verifyGatewaySignature(body){
+ if(!process.env.MIDTRANS_SERVER_KEY)throw apiError('Notifikasi tidak valid.',403);
  const expected=crypto.createHash('sha512').update(String(body.order_id)+String(body.status_code)+String(body.gross_amount)+process.env.MIDTRANS_SERVER_KEY).digest('hex'),supplied=String(body.signature_key||'');
  if(!/^[a-f0-9]{128}$/i.test(supplied)||!crypto.timingSafeEqual(Buffer.from(supplied.toLowerCase()),Buffer.from(expected)))throw apiError('Tanda tangan pembayaran tidak valid.',403);
- return p;
 }

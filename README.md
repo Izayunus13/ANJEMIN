@@ -98,7 +98,7 @@ anjemin-fullstack/
 | Negosiasi | Chat dua arah, penawaran nominal, reservasi barang/COD | Berfungsi untuk uji |
 | Google Maps | Peta, GPS, titik tujuan, Google Places rating + urut popularitas | Menunggu API key aktif |
 | Referral | Kode otomatis per akun, voucher Rp500 pengguna baru + Rp300 pengajak | Berfungsi untuk uji |
-| Komisi | Anjem/Barang/Jastip 6%; Lapak 3% maks Rp20.000 | Pencatatan, bukan pemungutan dana |
+| Komisi | Anjem/Barang/Jastip 6%; biaya pasang lapak Rp3.000 per produk | Lapak tayang setelah pembayaran QRIS; harga barang via chat/COD |
 | Pengelola | Persetujuan driver, statistik, ledger komisi, konfirmasi penerimaan manual | Berfungsi untuk uji |
 | Legal | Kebijakan privasi dan syarat orisinal berbentuk draf | Perlu ditinjau sebelum rilis |
 
@@ -147,7 +147,7 @@ Backend memanggil endpoint Twilio Verify (send/check), bukan mengirim SMS dari b
 ## 7. Referral dan simulasi komisi
 
 - ANJEM: `Math.round(fare * 0.06)` → perjalanan nominal Rp6.000 menghasilkan komisi tercatat Rp360.
-- Lapak: `Math.min(Math.round(actualPrice * 0.03), 20000)` → barang Rp200.000 pada harga deal Rp180.000 menghasilkan komisi Rp5.400.
+- Lapak: biaya upload Rp3.000 per produk, dibayar penjual melalui QRIS sebelum tayang; harga barang dibayar langsung melalui chat/COD tanpa komisi penjualan. Lihat [panduan marketplace](docs/marketplace-payments.md).
 - Pemilik kode mengajak pengguna baru → pengguna baru mendapat voucher Rp500 untuk 7 hari.
 - Setelah pengguna undangan **menyelesaikan order RIDE pertama** → pengajak mendapat voucher Rp300, tidak lebih dari sekali untuk pengguna undangan tersebut.
 - Voucher diterapkan ke jumlah yang dibayar pembeli; bagian driver (dalam simulasi) tetap berdasarkan tarif asli. Subsidi voucher dicatat sebagai pengeluaran promosi yang dapat membuat margin platform negatif.

@@ -41,6 +41,17 @@ test('PostgreSQL supports accounts, permissions, persistent private media, order
   assert.equal((await call('admin','/api/admin/users')).status,200);
 
   const image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jXioAAAAASUVORK5CYII=';
+  const listing=await call('customer','/api/listings',{title:'Buku kuliah',category:'Buku',price:20000,description:'Buku kuliah masih lengkap.',images:[image]});
+  assert.equal(listing.status,200,JSON.stringify(listing.data));assert.equal(listing.data.payment.amount,3000);
+  const listingId=listing.data.id;
+  assert.ok(!(await call('driver','/api/listings')).data.listings.some(item=>item.id===listingId));
+  assert.equal((await call('customer','/api/listings/'+listingId+'/publication-payment/simulate',{})).status,200);
+  assert.ok((await call('driver','/api/listings')).data.listings.some(item=>item.id===listingId));
+  const reservation=await call('driver','/api/listings/'+listingId+'/buy',{});assert.equal(reservation.status,200);
+  assert.equal((await call('driver','/api/market/orders/'+reservation.data.item.order_id+'/payment',{})).status,409);
+  assert.equal((await call('customer','/api/listings/'+listingId+'/complete',{order_id:reservation.data.item.order_id})).data.fee,0);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM ledger WHERE source_id=?').get(listingId).n,1);
+  assert.equal(db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get().version,2);
   const file=saveImage(image,'private');
   db.prepare('UPDATE users SET ktm_path=? WHERE id=?').run(file,'driver');
   assert.equal(db.prepare('SELECT name FROM stored_files WHERE name=?').get(file).name,file);

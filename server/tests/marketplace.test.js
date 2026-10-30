@@ -51,15 +51,15 @@ test('marketplace orders stay private and retain purchases, sales, and cancellat
   // A stale page must not cancel or complete somebody else's new reservation.
   assert.equal((await call('driver','/api/listings/book/cancel','POST',{order_id:firstId})).status,409);
   assert.equal((await call('driver','/api/listings/book/complete','POST',{order_id:firstId})).status,409);
-  assert.equal((await call('driver','/api/listings/book/complete','POST',{order_id:secondId})).status,409);
-  assert.equal((await call('other','/api/market/orders/'+secondId+'/payment/simulate','POST')).status,200);
-  assert.equal((await call('driver','/api/market/orders/'+secondId+'/handover','POST')).status,200);
-  assert.equal((await call('other','/api/market/orders/'+secondId+'/confirm','POST')).status,200);
+  assert.equal((await call('other','/api/market/orders/'+secondId+'/payment','POST')).status,409);
+  assert.equal((await call('other','/api/market/orders/'+secondId+'/payment/simulate','POST')).status,409);
+  assert.equal((await call('driver','/api/listings/book/complete','POST',{order_id:secondId})).status,200);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM market_payments').get().n,0);
   const old=(await orders('customer')).data.orders.find(o=>o.id===firstId);assert.equal(old.status,'CANCELLED');assert.equal(old.amount,20000);
   const sold=(await orders('other')).data.orders.find(o=>o.id===secondId);assert.equal(sold.status,'SOLD');assert.equal(sold.amount,30000);assert.ok(sold.completed_at);
   assert.equal((await call('other','/api/listings/book/cancel','POST',{order_id:secondId})).status,400);
   assert.equal((await call('driver','/api/listings/book/complete','POST',{order_id:secondId})).status,400);
-  assert.equal(db.prepare("SELECT COUNT(*) n FROM ledger WHERE source_id='book'").get().n,1);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM ledger WHERE source_id='book'").get().n,0);
   listing('driver-purchase','customer');
   assert.equal((await call('driver','/api/listings/driver-purchase/buy','POST')).status,200);
   assert.equal((await orders('driver')).data.orders.length,1);

@@ -6,16 +6,16 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import crypto from 'node:crypto';
 
-test('marketplace held funds release only after seller handover and buyer confirmation; retries, refunds, fees and wallets stay consistent',async()=>{
+test('historical marketplace held funds release only after seller handover and buyer confirmation; retries, refunds, fees and wallets stay consistent',async()=>{
  const folder=mkdtempSync(path.join(tmpdir(),'anjemin-market-payment-'));
  process.env.ANJEMIN_DATA_DIR=folder;process.env.PAYMENT_MODE='SIMULATION';
- const {db}=await import('../src/db.js');const {requireMarketSimulation}=await import('../src/market-payments.js');
+ const {db}=await import('../src/db.js');const {requireMarketSimulation,createMarketPayment}=await import('../src/market-payments.js');
  const port=60000+crypto.randomInt(2000);let child;
  const listing=(id,price=100000)=>db.prepare("INSERT INTO listings(id,seller_id,title,category,price,description,image_path) VALUES(?,'seller',?,'Buku',?,'Description','test.png')").run(id,id,price);
  async function call(user,url,method='GET',body={}){
   const r=await fetch('http://localhost:'+port+url,{method,headers:{Cookie:'anjemin_session='+user,'Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify(body)}:{})});return {status:r.status,data:await r.json()};
  }
- const checkout=async(id,user='buyer')=>{listing(id);const r=await call(user,'/api/listings/'+id+'/buy','POST');assert.equal(r.status,200);return r.data.item.order_id;};
+ const checkout=async(id,user='buyer')=>{listing(id);const r=await call(user,'/api/listings/'+id+'/buy','POST');assert.equal(r.status,200);const orderId=r.data.item.order_id;createMarketPayment(db.prepare('SELECT * FROM market_orders WHERE id=?').get(orderId));return orderId;};
  const payment=id=>db.prepare('SELECT * FROM market_payments WHERE order_id=?').get(id);
  const wallet=async()=> (await call('seller','/api/market/wallet')).data;
  try{
@@ -77,16 +77,16 @@ test('marketplace held funds release only after seller handover and buyer confir
   assert.equal((await call('buyer','/api/market/orders/'+expiry+'/payment/simulate','POST')).status,200);
   await call('buyer','/api/listings/expiry/cancel','POST',{order_id:expiry});
   // The maximum fee remains Rp20,000 and never reduces the buyer's invoice.
-  listing('cap',1000000);const cap=(await call('buyer','/api/listings/cap/buy','POST')).data.item.order_id;
+  listing('cap',1000000);const cap=(await call('buyer','/api/listings/cap/buy','POST')).data.item.order_id;createMarketPayment(db.prepare('SELECT * FROM market_orders WHERE id=?').get(cap));
   assert.equal(payment(cap).platform_fee,20000);assert.equal(payment(cap).amount,1000000);
   await call('buyer','/api/market/orders/'+cap+'/payment/simulate','POST');await call('seller','/api/market/orders/'+cap+'/handover','POST');
   assert.equal((await call('buyer','/api/market/orders/'+cap+'/confirm','POST')).status,200);assert.equal((await wallet()).available,1077000);
-  // An active historical COD order can opt into the website payment flow.
+  // COD orders stay offline; they cannot be converted to website payment.
   listing('legacy');db.prepare("UPDATE listings SET status='RESERVED',buyer_id='buyer',agreed_price=100000 WHERE id='legacy'").run();
   db.prepare("INSERT INTO market_orders(id,listing_id,buyer_id,seller_id,title,category,image_path,amount,status) VALUES('legacy-order','legacy','buyer','seller','Legacy','Buku','test.png',100000,'RESERVED')").run();
-  assert.equal((await call('buyer','/api/market/orders/legacy-order/payment','POST')).status,200);
-  assert.equal(db.prepare("SELECT payment_required FROM market_orders WHERE id='legacy-order'").get().payment_required,1);
-  assert.equal((await call('seller','/api/listings/legacy/complete','POST',{order_id:'legacy-order'})).status,409);
+  assert.equal((await call('buyer','/api/market/orders/legacy-order/payment','POST')).status,409);
+  assert.equal(db.prepare("SELECT payment_required FROM market_orders WHERE id='legacy-order'").get().payment_required,0);
+  assert.equal((await call('seller','/api/listings/legacy/complete','POST',{order_id:'legacy-order'})).status,200);
   assert.equal((await call('admin','/api/market/wallet')).status,403);
   process.env.NODE_ENV='production';assert.throws(()=>requireMarketSimulation(),/simulasi/);delete process.env.NODE_ENV;
  }finally{

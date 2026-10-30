@@ -114,9 +114,9 @@ test('payment lifecycle: authorization, held funds, customer release, retries an
   assert.equal((await call('admin','/api/admin/profits?mode=invalid')).status,400);
   db.prepare("INSERT INTO listings(id,seller_id,title,category,price,agreed_price,description,image_path,status) VALUES('stats-market','driver','Buku','Buku',10000,10000,'Buku kuliah','test.png','RESERVED')").run();
   assert.equal((await call('driver','/api/listings/stats-market/complete','POST')).status,200);
-  assert.equal(db.prepare("SELECT mode FROM ledger WHERE source_id='stats-market'").get().mode,'SIMULATION');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM ledger WHERE source_id='stats-market'").get().n,0);
   const marketStats=(await call('admin','/api/admin/profits?mode=SIMULATION&period=7')).data;
-  assert.equal(marketStats.services.find(r=>r.service==='MARKET').commission,300);
+  assert.equal(marketStats.services.find(r=>r.service==='MARKET').commission,0);
   assert.equal((await call('admin','/api/admin/profits?mode=MIDTRANS_LIVE')).data.totals.commission,0);
 
 

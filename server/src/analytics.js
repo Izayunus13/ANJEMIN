@@ -14,7 +14,7 @@ export function commissionEntries(mode){
  UNION ALL
  SELECT l.id,l.source_type,l.source_id,
  CASE WHEN l.source_type='SERVICE' THEN COALESCE(o.type,'SERVICE') ELSE 'MARKET' END,
- CASE WHEN l.source_type='SERVICE' THEN COALESCE(o.fare,0) ELSE COALESCE(item.agreed_price,item.price,0) END,
+ CASE WHEN l.source_type='SERVICE' THEN COALESCE(o.fare,0) WHEN l.source_type='MARKET_UPLOAD' THEN l.gross_fee ELSE COALESCE(item.agreed_price,item.price,0) END,
  l.gross_fee,l.promo_cost,l.collected,l.created_at,l.mode
  FROM ledger l LEFT JOIN service_orders o ON l.source_type='SERVICE' AND o.id=l.source_id
  LEFT JOIN listings item ON l.source_type='MARKET' AND item.id=l.source_id
