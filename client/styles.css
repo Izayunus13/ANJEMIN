@@ -454,3 +454,5 @@ html.app-revealing #app,html.app-revealing #modal-root,html.app-revealing #toast
 .order-search p{font-size:11px;line-height:1.7;margin:8px 0;color:var(--muted)}
 .order-search.is-expired{border-color:var(--primary2)}
 .order-search [hidden]{display:none!important}
+
+#car-passenger-field[hidden]{display:none!important}

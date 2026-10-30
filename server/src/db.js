@@ -120,6 +120,8 @@ if(!db.prepare('PRAGMA table_info(service_orders)').all().some(column=>column.na
  db.exec("ALTER TABLE service_orders ADD COLUMN vehicle_type TEXT NOT NULL DEFAULT 'MOTOR' CHECK(vehicle_type IN ('MOTOR','MOBIL'))");
 }
 
+if(!db.prepare('PRAGMA table_info(service_orders)').all().some(column=>column.name==='passenger_count'))db.exec('ALTER TABLE service_orders ADD COLUMN passenger_count INTEGER CHECK(passenger_count BETWEEN 1 AND 7)');
+
 if(!db.prepare('PRAGMA table_info(listings)').all().some(column=>column.name==='image_paths')){
  db.exec("ALTER TABLE listings ADD COLUMN image_paths TEXT NOT NULL DEFAULT '[]'");
 }
@@ -290,11 +292,11 @@ if(remoteDatabase)db.exec('BEGIN IMMEDIATE');
 try{
  const marker=remoteDatabase?db.prepare("SELECT to_regclass('_anjemin_schema_version') AS relation").get().relation:null;
  const current=marker?db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get()?.version:null;
- if(!remoteDatabase||current!==4){
+ if(!remoteDatabase||current!==5){
   initializeSchema();
   if(remoteDatabase){
    db.exec('CREATE TABLE IF NOT EXISTS _anjemin_schema_version(version INTEGER PRIMARY KEY)');
-   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(4);
+   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(5);
   }
  }
  if(remoteDatabase)db.exec('COMMIT');

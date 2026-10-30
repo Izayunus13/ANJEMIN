@@ -101,3 +101,7 @@ Setiap pesan menyimpan `delivered_at` dan `read_at` dari waktu server. Satu cent
 ## Batas pembayaran layanan
 
 Order CLAIMED yang belum lunas memiliki payment_deadline 5 menit sejak diterima dan payment_wait untuk countdown. Pembatalan otomatis mengisi cancel_reason=PAYMENT_TIMEOUT dan mengembalikan voucher. Invoice tidak mereset batas waktu. Lihat [detail verifikasi gateway dan scheduler](PAYMENT-TIMEOUT.md).
+
+## Penumpang Mobil
+
+POST /orders dengan type=RIDE dan vehicle_type=MOBIL wajib menyertakan passenger_count berupa bilangan bulat 1-7. Form Customer hanya menampilkan pilihan ini untuk Mobil. Jumlah disimpan pada pesanan, dipertahankan saat Order Ulang, serta tersedia di /driver/jobs dan /orders/mine. Motor dan layanan lain menyimpan null; pesanan lama tanpa data jumlah penumpang tetap null.

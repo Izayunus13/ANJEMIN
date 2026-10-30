@@ -416,6 +416,11 @@ route('POST',/^\/api\/orders$/,async(req,res)=>{
  const b=await parseJson(req),type=String(b.type||'');if(!['RIDE','DELIVERY','JASTIP'].includes(type))throw apiError('Jenis layanan tidak tersedia.');
  const vehicleType=type==='RIDE'?String(b.vehicle_type||'MOTOR'):'MOTOR';
  if(!['MOTOR','MOBIL'].includes(vehicleType))throw apiError('Pilih kendaraan Motor atau Mobil.');
+ let passengerCount=null;
+ if(type==='RIDE'&&vehicleType==='MOBIL'){
+  if(!['string','number'].includes(typeof b.passenger_count)||!/^[1-7]$/.test(String(b.passenger_count)))throw apiError('Pilih jumlah penumpang Mobil antara 1 sampai 7 orang.',400);
+  passengerCount=Number(b.passenger_count);
+ }
  const pickup=limited(b.pickup,5,240,'Lokasi jemput'),destination=limited(b.destination,5,240,'Tujuan'),fare=amount(b.fare,1000,5000000),notes=String(b.notes||'').slice(0,1000);
  if(type==='DELIVERY'&&(!b.item_name||!b.item_category||!b.item_weight||!b.image))throw apiError('Anterin barang wajib menyertakan nama, tipe, berat, dan foto.');
  if(type==='JASTIP'&&!b.item_name)throw apiError('Tuliskan barang yang ingin dititip.');
@@ -425,9 +430,9 @@ route('POST',/^\/api\/orders$/,async(req,res)=>{
   const voucher=b.voucher_id?db.prepare("SELECT * FROM vouchers WHERE id=? AND user_id=? AND redeemed_order_id IS NULL AND expires_at>?").get(b.voucher_id,u.id,new Date().toISOString()):null;
   if(b.voucher_id&&!voucher)throw apiError('Voucher tidak berlaku.');
   const promo=Math.min(fare,voucher?.amount||0),fee=Math.round(fare*.06);
-  db.prepare(`INSERT INTO service_orders(id,customer_id,type,vehicle_type,pickup,destination,pickup_lat,pickup_lng,destination_lat,destination_lng,
+  db.prepare(`INSERT INTO service_orders(id,customer_id,type,vehicle_type,passenger_count,pickup,destination,pickup_lat,pickup_lng,destination_lat,destination_lng,
   item_name,item_category,item_weight,image_path,place_id,place_name,notes,fare,platform_fee,promo_discount,voucher_id)
-  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,u.id,type,vehicleType,pickup,destination,validCoordinate(b.pickup_lat,-90,90),validCoordinate(b.pickup_lng,-180,180),validCoordinate(b.destination_lat,-90,90),validCoordinate(b.destination_lng,-180,180),b.item_name||null,b.item_category||null,b.item_weight?Number(b.item_weight):null,image,b.place_id||null,b.place_name||null,notes,fare,fee,promo,voucher?.id||null);
+  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,u.id,type,vehicleType,passengerCount,pickup,destination,validCoordinate(b.pickup_lat,-90,90),validCoordinate(b.pickup_lng,-180,180),validCoordinate(b.destination_lat,-90,90),validCoordinate(b.destination_lng,-180,180),b.item_name||null,b.item_category||null,b.item_weight?Number(b.item_weight):null,image,b.place_id||null,b.place_name||null,notes,fare,fee,promo,voucher?.id||null);
   db.prepare('UPDATE service_orders SET payment_required=1,search_expires_at=? WHERE id=?').run(new Date(Date.now()+ORDER_SEARCH_MS).toISOString(),id);
   if(voucher)db.prepare('UPDATE vouchers SET redeemed_order_id=? WHERE id=? AND redeemed_order_id IS NULL').run(id,voucher.id);
   return {id,platform_fee:fee,promo_discount:promo,payable:fare-promo};
@@ -463,7 +468,7 @@ route('POST',/^\/api\/orders\/([\w-]+)\/cancel$/,async(req,res,m)=>{
 });
 route('GET',/^\/api\/driver\/jobs$/,async(req,res)=>{
  const u=requireRole(req,['DRIVER']);if(u.driver_status!=='APPROVED'||!u.ready)return send(res,{orders:[],message:'Aktifkan Ready setelah verifikasi pengelola.'});
- send(res,{orders:db.prepare("SELECT id,customer_id,type,vehicle_type,pickup,destination,pickup_lat,pickup_lng,fare,platform_fee,notes,created_at,item_name,item_category,item_weight,image_path,place_name FROM service_orders WHERE status='OPEN' AND customer_id<>? AND (search_expires_at IS NULL OR search_expires_at>?) ORDER BY created_at ASC").all(u.id,new Date().toISOString()).map(o=>({...o,customer_profile:identityFor(o.customer_id)}))});
+ send(res,{orders:db.prepare("SELECT id,customer_id,type,vehicle_type,passenger_count,pickup,destination,pickup_lat,pickup_lng,fare,platform_fee,notes,created_at,item_name,item_category,item_weight,image_path,place_name FROM service_orders WHERE status='OPEN' AND customer_id<>? AND (search_expires_at IS NULL OR search_expires_at>?) ORDER BY created_at ASC").all(u.id,new Date().toISOString()).map(o=>({...o,customer_profile:identityFor(o.customer_id)}))});
 });
 route('POST',/^\/api\/driver\/ready$/,async(req,res)=>{
  const u=requireRole(req,['DRIVER']),b=await parseJson(req);

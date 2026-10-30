@@ -218,3 +218,48 @@ test('unavailable map assets still allow GPS and a manual address', async ({ pag
   expect(payload.pickup_lat).toBe(-7.06);
   expect(payload.pickup_lng).toBe(110.44);
 });
+
+test('car option requires a passenger selection and submits the selected 1-7 count', async ({ page }) => {
+  const { orders, errors } = await boot(page);
+  const form = page.locator('#order-form'), passenger = form.locator('[name="passenger_count"]');
+  await expect(passenger).toBeDisabled(); await expect(passenger).toBeHidden();
+  await form.locator('.vehicle-options label').filter({ hasText: 'Mobil' }).click();
+  await expect(passenger).toBeVisible(); await expect(passenger).toBeEnabled();
+  expect(await passenger.locator('option').allTextContents()).toEqual(['Pilih jumlah penumpang', '1 orang', '2 orang', '3 orang', '4 orang', '5 orang', '6 orang', '7 orang']);
+  await form.locator('[name="pickup"]').fill('Gerbang kampus sebelah utara');
+  await form.locator('[name="destination"]').fill('Kos Melati nomor dua');
+  await form.locator('[type="submit"]').click();
+  expect(orders).toHaveLength(0);
+  expect(await passenger.evaluate((element: HTMLSelectElement) => element.validity.valueMissing)).toBe(true);
+  await passenger.selectOption('7');
+  await form.locator('[type="submit"]').click();
+  await expect.poll(() => orders.length).toBe(1);
+  expect(orders[0]).toMatchObject({ type: 'RIDE', vehicle_type: 'MOBIL', passenger_count: '7' });
+  expect(errors).toEqual([]);
+});
+
+test('switching from car back to motor omits the passenger field', async ({ page }) => {
+  const { orders } = await boot(page);
+  const form = page.locator('#order-form'), passenger = form.locator('[name="passenger_count"]');
+  await form.locator('.vehicle-options label').filter({ hasText: 'Mobil' }).click();
+  await passenger.selectOption('4');
+  await form.locator('.vehicle-options label').filter({ hasText: 'Motor' }).click();
+  await expect(passenger).toBeHidden(); await expect(passenger).toBeDisabled();
+  await form.locator('[name="pickup"]').fill('Gerbang kampus sebelah utara');
+  await form.locator('[name="destination"]').fill('Kos Melati nomor dua');
+  await form.locator('[type="submit"]').click();
+  await expect.poll(() => orders.length).toBe(1);
+  expect(orders[0].vehicle_type).toBe('MOTOR'); expect(orders[0]).not.toHaveProperty('passenger_count');
+});
+
+test('driver sees passenger count before accepting and in accepted order details', async ({ page }) => {
+  const { errors } = await boot(page, 'RIDE', 'DRIVER');
+  const order = { id: 'car-passengers', type: 'RIDE', vehicle_type: 'MOBIL', passenger_count: 7, customer_id: 'customer', driver_id: 'map-fixture', status: 'CLAIMED', pickup: 'Gerbang kampus', destination: 'Kos Melati', fare: 10000, platform_fee: 600 };
+  await page.route('**/api/driver/jobs', route => route.fulfill({ json: { orders: [{ ...order, status: 'OPEN', driver_id: null }] } }));
+  await page.locator('[data-action="refresh-driver"]').click();
+  await expect(page.locator('#driver-results')).toContainText('Penumpang: 7 orang');
+  await page.route('**/api/orders/mine', route => route.fulfill({ json: { orders: [order] } }));
+  await page.locator('.side-link[data-nav="orders"]').click();
+  await expect(page.locator('#orders-results')).toContainText('Penumpang: 7 orang');
+  expect(errors).toEqual([]);
+});
