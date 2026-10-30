@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {db,seedAdmin} from './db.js';
 import {uuid,hashPassword,verifyPassword,sha256,currentUser,createSession,requireUser,requireRole,validatePhone,limited,amount,dateAfter,apiError,rateLimit,cookieHeader,needsProfile} from './security.js';
 import {saveImage,loadImage,removeImage} from './upload.js';
-import {paymentMode,paymentFor,createPayment,refreshPayment,settlePayment,releasePayment,verifyNotification,storeGatewayStatus} from './payments.js';
+import {paymentMode,paymentFor,createPayment,refreshPayment,settlePayment,releasePayment,verifyNotification,storeGatewayStatus,gateway} from './payments.js';
 import {commissionEntries,profitStatistics} from './analytics.js';
 import {driverAchievements,claimDriverAchievement} from './driver-achievements.js';
 import {requireMarketSimulation,marketPaymentFor,createMarketPayment,payMarketSimulation,cancelMarketPayment,releaseMarketPayment} from './market-payments.js';
@@ -17,6 +17,8 @@ import {withdrawalProviders,sellerBalance,sellerWithdrawals,withdrawMarketSimula
 import {identityFor,updateAccountProfile} from './account-profiles.js';
 import {pickupNavigation} from './pickup-navigation.js';
 import {ORDER_SEARCH_MS,searchWindow,retryOrderSearch} from './order-search.js';
+import {orderViews} from './order-views.js';
+import {PAYMENT_WAIT_MS,paymentWait,expireUnpaidOrder,expireDuePayments} from './payment-timeout.js';
 import {orderMediaUsage,sendOrderChatMessage,orderChatMessages,loadOrderChatMedia,orderChatReceipts,pendingOrderChatInbox,acknowledgeOrderChat} from './order-chat.js';
 
 const root=path.resolve('client');
@@ -399,16 +401,15 @@ route('GET',/^\/api\/orders\/([\w-]+)\/media\/([\w.-]+)$/,async(req,res,m)=>{
  }
  res.writeHead(200,{...headers,'Content-Length':body.length});res.end(body);
 });
-function orderView(u){return db.prepare(`SELECT o.*,cu.username customer_name,du.username driver_name FROM service_orders o
-  JOIN users cu ON cu.id=o.customer_id LEFT JOIN users du ON du.id=o.driver_id
-  WHERE o.customer_id=? OR o.driver_id=? ORDER BY o.created_at DESC LIMIT 80`).all(u.id,u.id);}
 route('GET',/^\/api\/orders\/mine$/,async(req,res)=>{
- const u=requireUser(req);
- const now=Date.now();
- send(res,{server_time:new Date(now).toISOString(),orders:orderView(u).map(o=>{
-  const payment=paymentFor(o.id);
-  return {...o,payment,search:searchWindow(o,now),pickup_navigation:pickupNavigation(u,o,payment),customer_profile:identityFor(o.customer_id),driver_profile:identityFor(o.driver_id)};
- })});
+ const u=requireUser(req);let orders=orderViews(u);const now=Date.now();
+ const due=orders.filter(o=>o.status==='CLAIMED'&&o.payment_deadline&&Date.parse(o.payment_deadline)<=now&&!['HELD','RELEASED'].includes(o.payment?.status));
+ if(due.length){
+  await Promise.allSettled(due.map(o=>expireUnpaidOrder(o.id)));
+  orders=orderViews(u);
+ }
+ const serverNow=Date.now();
+ send(res,{server_time:new Date(serverNow).toISOString(),orders:orders.map(o=>({...o,search:searchWindow(o,serverNow),payment_wait:paymentWait(o,o.payment,serverNow),pickup_navigation:pickupNavigation(u,o,o.payment)}))});
 });
 route('POST',/^\/api\/orders$/,async(req,res)=>{
  const u=requireRole(req,['CUSTOMER','DRIVER']);rateLimit('order-'+u.id,24,60);
@@ -471,9 +472,9 @@ route('POST',/^\/api\/driver\/ready$/,async(req,res)=>{
 });
 route('POST',/^\/api\/orders\/([\w-]+)\/claim$/,async(req,res,m)=>{
  const u=requireRole(req,['DRIVER']);
- const changed=tx(()=>db.prepare(`UPDATE service_orders SET status='CLAIMED',driver_id=?
+ const changed=tx(()=>db.prepare(`UPDATE service_orders SET status='CLAIMED',driver_id=?,payment_deadline=CASE WHEN payment_required=1 THEN ? ELSE NULL END
    WHERE id=? AND status='OPEN' AND customer_id<>? AND (search_expires_at IS NULL OR search_expires_at>?) AND EXISTS
-   (SELECT 1 FROM users WHERE id=? AND ready=1 AND driver_status='APPROVED')`).run(u.id,m[1],u.id,new Date().toISOString(),u.id).changes);
+   (SELECT 1 FROM users WHERE id=? AND ready=1 AND driver_status='APPROVED')`).run(u.id,new Date(Date.now()+PAYMENT_WAIT_MS).toISOString(),m[1],u.id,new Date().toISOString(),u.id).changes);
  if(changed!==1)throw apiError('Order sudah diambil, waktu pencarian habis, atau kamu sedang Not Ready.',409);
  send(res,{ok:true,message:'Order berhasil kamu ambil!'});
 });
@@ -502,28 +503,29 @@ function notifyPayment(orderId,message){
  const o=db.prepare('SELECT driver_id FROM service_orders WHERE id=?').get(orderId);
  for(const item of subscribers)if(item.userId===o?.driver_id)item.res.write('event: payment-update\ndata: '+JSON.stringify({order_id:orderId,message})+'\n\n');
 }
-function accessiblePaymentOrder(req,id,customerOnly=false){
- const u=requireUser(req),o=db.prepare('SELECT * FROM service_orders WHERE id=?').get(id);
+async function accessiblePaymentOrder(req,id,customerOnly=false){
+ const u=requireUser(req);let o=db.prepare('SELECT * FROM service_orders WHERE id=?').get(id);
  if(!o||(customerOnly?o.customer_id!==u.id:![o.customer_id,o.driver_id].includes(u.id)))throw apiError('Pesanan tidak ditemukan.',404);
+ if(o.status==='CLAIMED'&&o.payment_deadline&&Date.parse(o.payment_deadline)<=Date.now()){await expireUnpaidOrder(id);o=db.prepare('SELECT * FROM service_orders WHERE id=?').get(id);}
  if(!o.payment_required)throw apiError('Pesanan lama belum memakai QRIS.',409);
  return {u,o};
 }
 route('POST',/^\/api\/orders\/([\w-]+)\/payment$/,async(req,res,m)=>{
- const {u,o}=accessiblePaymentOrder(req,m[1],true);rateLimit('payment-'+u.id,20,60);
+ const {u,o}=await accessiblePaymentOrder(req,m[1],true);rateLimit('payment-'+u.id,20,60);
  if(o.status!=='CLAIMED'||!o.driver_id)throw apiError('Pembayaran tersedia setelah penganjem menerima pesanan.',409);
  send(res,{payment:await createPayment(o)});
 });
 route('GET',/^\/api\/orders\/([\w-]+)\/payment$/,async(req,res,m)=>{
- const {o}=accessiblePaymentOrder(req,m[1]);send(res,{payment:paymentFor(o.id)});
+ const {o}=await accessiblePaymentOrder(req,m[1]);send(res,{payment:paymentFor(o.id),order_status:o.status,cancel_reason:o.cancel_reason,payment_deadline:o.payment_deadline});
 });
 route('POST',/^\/api\/orders\/([\w-]+)\/payment\/refresh$/,async(req,res,m)=>{
- const {u,o}=accessiblePaymentOrder(req,m[1]);rateLimit('payment-refresh-'+u.id,30,60);
+ const {u,o}=await accessiblePaymentOrder(req,m[1]);rateLimit('payment-refresh-'+u.id,30,60);
  const p=paymentFor(o.id);if(!p)throw apiError('Buat pembayaran dahulu.',409);
  if(await refreshPayment(p))notifyPayment(o.id,'Pembayaran diterima. Dana masih tertahan.');
- send(res,{payment:paymentFor(o.id)});
+ send(res,{payment:paymentFor(o.id),order_status:o.status,cancel_reason:o.cancel_reason,payment_deadline:o.payment_deadline});
 });
 route('POST',/^\/api\/orders\/([\w-]+)\/payment\/simulate$/,async(req,res,m)=>{
- const {o}=accessiblePaymentOrder(req,m[1],true),p=paymentFor(o.id);
+ const {o}=await accessiblePaymentOrder(req,m[1],true),p=paymentFor(o.id);
  if(process.env.NODE_ENV==='production'||paymentMode()!=='SIMULATION'||p?.mode!=='SIMULATION')throw apiError('Simulasi tidak tersedia.',403);
  await refreshPayment(p);
  tx(()=>{
@@ -544,7 +546,10 @@ route('POST',/^\/api\/payments\/midtrans\/notification$/,async(req,res)=>{
   send(res,{ok:true});return;
  }
  const p=verifyNotification(body);
- if(tx(()=>storeGatewayStatus(p,body)))notifyPayment(p.order_id,'Pembayaran diterima. Dana masih tertahan.');
+ if(!['HELD','RELEASED'].includes(p.status)){
+  const data=await gateway(p.mode,'/v2/'+encodeURIComponent(p.id)+'/status');
+  if(tx(()=>storeGatewayStatus(p,data)))notifyPayment(p.order_id,'Pembayaran diterima. Dana masih tertahan.');
+ }
  send(res,{ok:true});
 });
 route('POST',/^\/api\/orders\/([\w-]+)\/delivered$/,async(req,res,m)=>{
@@ -739,6 +744,10 @@ async function serve(req,res){
  const type=mime[path.extname(target)]||'application/octet-stream';
  res.writeHead(200,{'Content-Type':type,'Cache-Control':!prod||target.endsWith('index.html')?'no-store':'public, max-age=300','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin'});
  fs.createReadStream(target).pipe(res);
+}
+// Persistent servers reconcile deadlines even when the customer closes the tab.
+if(!process.env.VERCEL&&!process.env.NODE_TEST_CONTEXT){
+ const timer=setInterval(()=>{expireDuePayments().then(events=>{for(const event of events)notifyPayment(event.id,event.status==='CANCELLED'?'Pesanan dibatalkan otomatis: Customer belum membayar dalam 5 menit.':'Pembayaran diterima. Dana masih tertahan.');}).catch(()=>{});},15000);timer.unref();
 }
 export const handleRequest=(req,res)=>serve(req,res).catch(err=>{
  console.error('[SERVER ERROR]',err.message);

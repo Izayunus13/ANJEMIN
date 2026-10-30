@@ -16,7 +16,13 @@ async function api(url,opts={}){
  if(d.code==='PROFILE_INCOMPLETE'&&state.user){state.user.profile_complete=false;go('profile');}
  if(!r.ok)throw Error(d.error||'Permintaan gagal.');return d;
 }
-const get=url=>api(url);
+const pendingGets=new Map();
+const get=url=>{
+ const key=(state.user?.id||'guest')+':'+url;
+ if(pendingGets.has(key))return pendingGets.get(key);
+ const request=api(url).finally(()=>{if(pendingGets.get(key)===request)pendingGets.delete(key);});
+ pendingGets.set(key,request);return request;
+};
 const post=(url,payload={})=>api(url,{method:'POST',body:JSON.stringify(payload)});
 function setTheme(value){state.theme=value;document.documentElement.classList.toggle('dark',value==='dark');localStorage.setItem('anjemin-theme',value);document.querySelector('[name="theme-color"]')?.setAttribute('content',value==='dark'?'#171421':'#f9f6ff');}
 function go(page,{keepSidebar=false}={}){
@@ -29,7 +35,14 @@ function go(page,{keepSidebar=false}={}){
  state.page=page;state.marketMenuOpen=inMarketplace;state.dropdown=false;if(window.innerWidth<760&&!keepSidebar)state.sideHidden=true;window.scrollTo({top:0,behavior:'smooth'});render();if(pageChanged)$('#app main')?.classList.add('page-fade-enter');animateMarketplaceClose(closing);if(page==='market')loadListings();if(['market-orders','market-history'].includes(page))loadMarketOrders();if(page==='orders')loadOrders();if(page==='driver')loadDriverJobs();if(page==='chat')loadConversations();if(page==='admin')loadAdmin();if(page==='admin-profits')loadProfitStats();if(page==='admin-users')loadAdminUsers();if(['admin-reports','admin-driver-reports'].includes(page))loadOrderReports();if(page==='wallet')loadWallet();if(page==='achievements')loadAchievements();}
 function requireLogin(){if(state.user)return true;openModal('auth');return false;}
 function serviceTiles(){return `<div class="service-grid">${['RIDE','DELIVERY','JASTIP','MARKET'].map((v,i)=>`<article class="service-card" data-service="${v}" role="button" tabindex="0"><div class="service-icon">${ico(icons[v],'lg')}</div><h3>${labels[v]}</h3><p>${subtitles[v]}</p><span class="service-chevron">${ico('chevron','sm')}</span></article>`).join('')}</div>`;}
-let headerWalletCache=null,headerWalletPending=null;
+let headerWalletCache=null,headerWalletPending=null,driverWalletSnapshot=null;
+async function getDriverWallet(force=false){
+ const userId=state.user?.id;
+ if(!force&&driverWalletSnapshot?.userId===userId&&Date.now()-driverWalletSnapshot.at<15000)return driverWalletSnapshot.data;
+ const data=await get('/api/driver/wallet');
+ if(state.user?.id===userId)driverWalletSnapshot={userId,data,at:Date.now()};
+ return data;
+}
 function headerWalletAmount(){return headerWalletCache?.userId===state.user?.id?'Rp '+Number(headerWalletCache.available).toLocaleString('id-ID'):'...';}
 async function refreshHeaderWallet(force=false){
  if(state.user?.role!=='DRIVER')return;
@@ -39,7 +52,7 @@ async function refreshHeaderWallet(force=false){
  const request={userId};
  request.promise=(async()=>{
   try{
-   const d=await get('/api/driver/wallet');
+   const d=await getDriverWallet(force);
    if(state.user?.id!==userId||state.user?.role!=='DRIVER')return;
    headerWalletCache={userId,available:d.available,updatedAt:Date.now()};
    const el=$('#header-wallet-amount');if(el)el.textContent=headerWalletAmount();
@@ -61,7 +74,7 @@ function footer(){return `<footer class="footer"><div class="container"><div cla
  <div><h4>Informasi & Bantuan</h4><a href="#" data-nav="privacy">Kebijakan Privasi</a><a href="#" data-nav="terms">Syarat & Ketentuan</a><a href="#" data-nav="contact">Pusat Bantuan</a><a href="#" data-nav="home">Beranda</a></div>
  </div><div class="footer-end"><span>© ${new Date().getFullYear()} ANJEMIN. Hak cipta dilindungi.</span><span>Dirancang untuk komunitas, dikembangkan dengan perhatian pada keamanan · <strong>by ANJEMINAJA</strong></span></div></div></footer>`;}
 function landing(){return `${header()}<main class="y2k-page">${y2kBackdrop()}<section class="hero"><div class="softblob"></div><div class="container"><div><span class="kicker">✦ Dari Tembalang, buat hari-harimu</span><h1>Gak perlu ribet.<br/><em>ANJEMIN</em> aja!</h1><p class="hero-description">Butuh anjem ke kampus, titip jajan, kirim barang, atau cari barang kos? Semuanya bisa di satu tempat yang terasa dekat dan gampang dipakai.</p><div class="hero-buttons"><button class="button" data-action="login">Mulai sekarang ${ico('chevron')}</button><button class="button secondary" data-anchor="layanan">Lihat layanan ${ico('chevron')}</button></div><div class="hero-tags" aria-label="Layanan ANJEMIN">${[['bike','Antar-jemput'],['package','Kirim barang'],['shopping','Jasa Titip'],['store','Marketplace']].map(([icon,title])=>`<a class="hero-service" href="#layanan" data-anchor="layanan">${ico(icon,'sm')}<strong>${title}</strong></a>`).join('')}</div></div>
- <div class="hero-art"><div class="rider-wrap"><img src="/anjemin-logo-transparent.png" alt="Ilustrasi pengendara motor ANJEMIN dan identitas merek"/></div><div class="phone-ui"><div class="phone-notch"></div><div class="phone-map" aria-hidden="true"><svg class="phone-journey" viewBox="0 0 155 194"><path class="journey-road" d="M40 36 61 119Q64 134 79 130L127 116"/><path class="journey-trail" d="M40 36 61 119Q64 134 79 130L127 116" pathLength="100"/><circle cx="40" cy="36" r="5" fill="#9470db"/><circle class="journey-beacon" cx="127" cy="116" r="11"/><circle cx="127" cy="116" r="5" fill="#ffb79d" stroke="white" stroke-width="2"/><g class="journey-traveler"><circle r="11" fill="#a486e0" opacity=".22"/><circle r="5.5" fill="#7555bd" stroke="white" stroke-width="2"/><animateMotion dur="5s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.12;0.85;1" keyPoints="0;0;1;1" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1" path="M40 36 61 119Q64 134 79 130L127 116"/></g></svg><span class="journey-live"><span></span>DALAM PERJALANAN</span></div><div class="phone-bottom">📍 Tujuanmu tinggal pilih!<br/><span class="muted">ANJEMIN siap bantu.</span></div></div><div class="float-card one">✨ Satu akun, empat layanan</div><div class="float-card two">🛵 Mager? ANJEMIN aja!</div></div></div><div class="hero-edge"></div></section>
+ <div class="hero-art"><div class="rider-wrap"><img src="/anjemin-logo-transparent.webp" alt="Ilustrasi pengendara motor ANJEMIN dan identitas merek"/></div><div class="phone-ui"><div class="phone-notch"></div><div class="phone-map" aria-hidden="true"><svg class="phone-journey" viewBox="0 0 155 194"><path class="journey-road" d="M40 36 61 119Q64 134 79 130L127 116"/><path class="journey-trail" d="M40 36 61 119Q64 134 79 130L127 116" pathLength="100"/><circle cx="40" cy="36" r="5" fill="#9470db"/><circle class="journey-beacon" cx="127" cy="116" r="11"/><circle cx="127" cy="116" r="5" fill="#ffb79d" stroke="white" stroke-width="2"/><g class="journey-traveler"><circle r="11" fill="#a486e0" opacity=".22"/><circle r="5.5" fill="#7555bd" stroke="white" stroke-width="2"/><animateMotion dur="5s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.12;0.85;1" keyPoints="0;0;1;1" keySplines="0.4 0 0.2 1;0.4 0 0.2 1;0.4 0 0.2 1" path="M40 36 61 119Q64 134 79 130L127 116"/></g></svg><span class="journey-live"><span></span>DALAM PERJALANAN</span></div><div class="phone-bottom">📍 Tujuanmu tinggal pilih!<br/><span class="muted">ANJEMIN siap bantu.</span></div></div><div class="float-card one">✨ Satu akun, empat layanan</div><div class="float-card two">🛵 Mager? ANJEMIN aja!</div></div></div><div class="hero-edge"></div></section>
  <section id="layanan" class="section"><div class="container"><span class="kicker">Kenalan dulu, yuk</span><h2 class="section-title">Mau ngapain hari ini?</h2><p class="section-copy">Dari perjalanan singkat sampai jual beli barang kebutuhan, pilih layanan yang paling pas buat kamu.</p>${serviceTiles()}</div></section>
  <section id="promo" class="section"><div class="container"><div class="promo"><div><span class="chip">PROMO REFERRAL</span><h2>Ajak temen, hemat barengan!</h2><p>Bagikan kode referral kamu. Pengguna baru bisa mendapat voucher Rp500 dan pengajak bisa memperoleh voucher Rp300 setelah syarat transaksi terpenuhi. Promo dapat berubah.</p><button class="button peach" data-action="login">Ambil kode referral ${ico('chevron','sm')}</button></div><div class="mockvoucher"><div>🎟️ VOUCHER ANJEMIN</div><strong>Rp500</strong><span>Hai, pengguna baru!</span></div></div></div></section>
  <section class="section"><div class="container"><span class="kicker">Tentang ANJEMIN</span><h2 class="section-title">Dekat dengan mahasiswa.<br/>Dibuat untuk keseharian.</h2><p class="section-copy">ANJEMIN dirancang sebagai ruang digital untuk saling membantu. Ada halaman penumpang, pengemudi terverifikasi, serta marketplace dengan ruang nego langsung. Platform ini masih tahap pengembangan; ketersediaan layanan dan tarif komersial menunggu verifikasi operasional.</p></div></section></main>${footer()}`;}
@@ -194,7 +207,7 @@ async function requestCloseModal(){
  }
  closeModal();
 }
-function closeModal(){if(activeConfirmation)activeConfirmation.finish(false);cleanupOrderChatReceipts();releaseOrderChatAttachment();releaseListingPhotos();clearTimeout(orderChatTimer);stopSignupOtpTimer();state.modal=null;$('#modal-root').innerHTML='';}
+function closeModal(){clearTimeout(paymentModalDeadlineTimer);if(activeConfirmation)activeConfirmation.finish(false);cleanupOrderChatReceipts();releaseOrderChatAttachment();releaseListingPhotos();clearTimeout(orderChatTimer);stopSignupOtpTimer();state.modal=null;$('#modal-root').innerHTML='';}
 function renderModal(){
  if(state.modal?.which==='listing-fee'){renderListingFeeModal(state.modal.id);return;}const m=state.modal;if(!m){$('#modal-root').innerHTML='';return;}
  if(m.which==='user-profile'){renderPublicProfile(m);return;}
@@ -394,17 +407,24 @@ async function buyListing(id,price){
  const d=await post(`/api/listings/${id}/buy`,price?{agreed_price:price}:{});closeModal();toast(d.message);state.marketOrderView='BUYER';go('market-orders');
 }
 async function startNego(id){if(!requireLogin())return;const data=await post('/api/chat/start',{listing_id:id});closeModal();state.activeChat=data.conversation_id;go('chat');await loadConversations();await loadMessages(data.conversation_id);}
-let orderLoadSequence=0;
+let orderLoadSequence=0,orderLoadPending=null;
 async function loadOrders(){
- if(!state.user)return;const userId=state.user.id,sequence=++orderLoadSequence;
+ if(!state.user)return;const userId=state.user.id;if(orderLoadPending?.userId===userId)return orderLoadPending.promise;
+ const sequence=++orderLoadSequence,request={userId};
+ request.promise=(async()=>{
  try{
   const d=await get('/api/orders/mine');if(state.user?.id!==userId||sequence!==orderLoadSequence)return;
   orderSearchServerTime=Date.parse(d.server_time)||Date.now();orderSearchReceivedAt=performance.now();
-  state.orders=d.orders;paintOrders();if(state.page==='orders')loadWalletSummary();
+  state.orders=d.orders;const target=$('#orders-results');
+  if(target?._ordersSignature!==ordersSignature())paintOrders();else updateOrderSearchCountdown();
+  if(state.page==='orders')loadWalletSummary();
  }catch(e){if(state.user?.id===userId&&sequence===orderLoadSequence)toast(e.message,true);}
+ finally{if(orderLoadPending===request)orderLoadPending=null;}
+ })();orderLoadPending=request;return request.promise;
 }
-function paintOrders(){const el=$('#orders-results');if(!el)return;scheduleOrderStamps();el.innerHTML=state.orders.length?state.orders.map(x=>`<div class="list-row"><div><strong>${esc(labels[x.type])}</strong> <span class="tag ${x.status==='COMPLETED'?'success':x.status==='CANCELLED'?'danger':'warning'}">${orderStatus(x.status)}</span>${x.type==='RIDE'?`<p>Kendaraan: ${x.vehicle_type==='MOBIL'?'Mobil':'Motor'}</p>`:''}<p>${esc(x.pickup)} → ${esc(x.destination)}</p><p>Tarif ${money(x.fare)} · Diskon ${money(x.promo_discount)} · ${esc(x.driver_name?'Driver @'+x.driver_name:'Menunggu driver')}</p>${identityChip(x.customer_id===state.user.id?x.driver_profile:x.customer_profile)}${orderSearchHtml(x)}</div><div class="actions">${showCompletedStamp(x)?completedOrderStamp():`${paymentActions(x)}${pickupRouteAction(x)}${x.driver_id&&['CLAIMED','COMPLETED'].includes(x.status)?`<button class="button secondary tiny" data-orderchat="${x.id}">${ico('chat','sm')} ${x.customer_id===state.user.id?'Chat Penganjem':'Chat Customer'}</button>`:''}${x.status==='OPEN'&&x.customer_id===state.user.id?`<button class="button outline tiny" data-cancelorder="${x.id}">Batalkan</button>`:''}${x.status==='CLAIMED'&&!x.payment_required&&x.customer_id===state.user.id?`<button class="button tiny" data-completeorder="${x.id}">Selesai</button>`:''}`}<button class="button outline tiny report-order-button" data-reportorder="${x.id}">Laporkan</button></div></div>`).join(''):'<p class="muted small">Belum ada order. Coba pesan layanan pertama kamu.</p>';
- startOrderSearchCountdown();
+function ordersSignature(){return JSON.stringify(state.orders,(key,value)=>['remaining_seconds','timed_out'].includes(key)?undefined:value);}
+function paintOrders(){const el=$('#orders-results');if(!el)return;scheduleOrderStamps();el.innerHTML=state.orders.length?state.orders.map(x=>`<div class="list-row"><div><strong>${esc(labels[x.type])}</strong> <span class="tag ${x.status==='COMPLETED'?'success':x.status==='CANCELLED'?'danger':'warning'}">${orderStatus(x.status)}</span>${x.type==='RIDE'?`<p>Kendaraan: ${x.vehicle_type==='MOBIL'?'Mobil':'Motor'}</p>`:''}<p>${esc(x.pickup)} → ${esc(x.destination)}</p><p>Tarif ${money(x.fare)} · Diskon ${money(x.promo_discount)} · ${esc(x.driver_name?'Driver @'+x.driver_name:'Menunggu driver')}</p>${identityChip(x.customer_id===state.user.id?x.driver_profile:x.customer_profile)}${orderSearchHtml(x)}${paymentWaitHtml(x)}</div><div class="actions">${showCompletedStamp(x)?completedOrderStamp():`${paymentActions(x)}${pickupRouteAction(x)}${x.driver_id&&['CLAIMED','COMPLETED'].includes(x.status)?`<button class="button secondary tiny" data-orderchat="${x.id}">${ico('chat','sm')} ${x.customer_id===state.user.id?'Chat Penganjem':'Chat Customer'}</button>`:''}${x.status==='OPEN'&&x.customer_id===state.user.id?`<button class="button outline tiny" data-cancelorder="${x.id}">Batalkan</button>`:''}${x.status==='CLAIMED'&&!x.payment_required&&x.customer_id===state.user.id?`<button class="button tiny" data-completeorder="${x.id}">Selesai</button>`:''}`}<button class="button outline tiny report-order-button" data-reportorder="${x.id}">Laporkan</button></div></div>`).join(''):'<p class="muted small">Belum ada order. Coba pesan layanan pertama kamu.</p>';
+ el._ordersSignature=ordersSignature();startOrderSearchCountdown();
 }
 async function loadDriverJobs(){if(!state.user||state.user.role!=='DRIVER')return;
  try{const data=await get('/api/driver/jobs');state.driverJobs=data.orders;paintDriverJobs();}catch(e){toast(e.message,true);}}
@@ -424,7 +444,7 @@ function setupStream(){pollOrderChatInbox();state.stream?.close();state.stream=n
   if(navigator.vibrate)navigator.vibrate([150,90,150]);if(state.page==='driver')loadDriverJobs();
  });state.stream.onerror=()=>{};
 }
-async function claimOrder(id){const r=await post(`/api/orders/${id}/claim`);toast(r.message);loadDriverJobs();go('orders');loadOrders();}
+async function claimOrder(id){const r=await post(`/api/orders/${id}/claim`);toast(r.message);loadDriverJobs();go('orders');}
 async function completeOrder(id){if(!await confirmAction({title:'Selesaikan pesanan?',message:'Dana akan masuk ke saldo Penganjem setelah konfirmasi ini.',confirmLabel:'Ya, selesaikan',cancelLabel:'Kembali'}))return;const r=await post(`/api/orders/${id}/complete`);toast(r.message);loadOrders();}
 async function cancelOrder(id){if(!await confirmAction({title:'Batalkan pesanan?',message:'Pesanan masih menunggu Penganjem. Voucher akan dikembalikan jika pembatalan berhasil.',confirmLabel:'Batalkan pesanan',cancelLabel:'Kembali',danger:true}))return;await post(`/api/orders/${id}/cancel`);toast('Pesanan dibatalkan. Voucher dikembalikan jika ada.');loadOrders();}
 function copyReferral(){navigator.clipboard?.writeText(state.user.referral_code).then(()=>toast('Kode referral disalin: '+state.user.referral_code)).catch(()=>toast('Kode referral: '+state.user.referral_code));}
@@ -518,7 +538,7 @@ async function handleOrder(form){const b=pickFormValues(form);b.type=state.servi
  if(state.destinationCoords){b.destination_lat=state.destinationCoords.lat;b.destination_lng=state.destinationCoords.lng;}
  if(state.selectedPlace&&state.service==='JASTIP'&&!form.matches('[data-jastip-form]')){b.place_id=state.selectedPlace.id;b.place_name=state.selectedPlace.name;}
  if(state.service==='DELIVERY')b.image=await file64(form.elements.image.files[0]);
- const result=await post('/api/orders',b);toast(`Order dibuat! Komisi platform ${money(result.order.platform_fee)} (catatan internal), potongan ${money(result.order.promo_discount)}.`);go('orders');loadOrders();}
+ const result=await post('/api/orders',b);toast(`Order dibuat! Komisi platform ${money(result.order.platform_fee)} (catatan internal), potongan ${money(result.order.promo_discount)}.`);go('orders');}
 function clearSelectedMap(){state.coords=null;state.destinationCoords=null;state.selectedPlace=null;state.jastipPickupCoords=null;state.driverFilter=null;}
 // Semua handler dipasang satu kali agar tidak menggandakan event setelah setiap render.
 document.addEventListener('click',async event=>{
@@ -847,15 +867,17 @@ function walletHistory(title,rows,renderRow,empty){
 }
 async function loadWallet(){
  try{
-  const d=await get('/api/driver/wallet'),el=$('#wallet-results');refreshHeaderWallet(true);if(!el)return;
+  const d=await getDriverWallet(true),el=$('#wallet-results');refreshHeaderWallet(true);if(!el)return;
   el.innerHTML=walletCards(d)+`<section class="card wallet-withdraw"><div class="card-head"><div><span class="kicker">Pencairan saldo</span><h3>Siap tarik pendapatanmu?</h3><p class="small muted">Cairkan ke rekening bank atau e-wallet.</p></div><button type="button" class="button" data-driver-withdraw ${d.withdrawalSimulationEnabled&&d.available>0?'':'disabled'}>Tarik Saldo &nearr;</button></div><p class="form-hint">${d.withdrawalSimulationEnabled?'Penarikan simulasi, tanpa transfer uang sungguhan.':'Pencairan belum tersedia pada mode pembayaran ini.'}</p></section>`+walletHistory('Riwayat penarikan',d.withdrawals||[],w=>walletActivity({title:withdrawalProviderName(d,w.channel,w.provider)+' '+w.masked_number,detail:w.account_name,date:w.created_at,amount:w.amount,outgoing:true}), 'Penarikan saldo akan muncul di sini.')+walletHistory('Riwayat saldo masuk',d.credits,c=>walletActivity({title:c.kind==='REWARD'?'Reward '+c.title+' / '+c.target+' anjeman':'Pesanan '+c.order_id.slice(0,8),detail:c.kind==='REWARD'?'Bonus pencapaian':'Pendapatan pesanan',date:c.created_at,amount:c.amount,reward:c.kind==='REWARD'}),'Pendapatan yang sudah dilepas akan muncul di sini.');
  }catch(e){toast(e.message,true);}
 }
 async function loadWalletSummary(){
  if(state.user?.role!=='DRIVER')return;
- try{const d=await get('/api/driver/wallet');const el=$('#wallet-summary');if(el)el.innerHTML=walletCards(d);}catch(e){toast(e.message,true);}
+ try{const d=await getDriverWallet();const el=$('#wallet-summary');if(el)el.innerHTML=walletCards(d);}catch(e){toast(e.message,true);}
 }
+let paymentModalDeadlineTimer=null;
 async function renderPaymentModal(id,refresh=false){
+ clearTimeout(paymentModalDeadlineTimer);
  const root=$('#modal-root');
  root.innerHTML=modalWrap('Pembayaran pesanan','<p role="status">Memuat pembayaran...</p>');
  try{
@@ -865,7 +887,10 @@ async function renderPaymentModal(id,refresh=false){
   const p=d.payment;if(!p)throw Error('Customer belum membuat pembayaran.');
   const customer=state.orders.find(o=>o.id===id)?.customer_id===state.user.id;
   let content='<div class="note warning">'+esc(paymentEnvironment(p.mode))+'</div><p>Nomor transaksi: <span style="overflow-wrap:anywhere">'+esc(p.id)+'</span></p><h2>'+money(p.amount)+'</h2><p role="status" class="payment-status payment-'+(['HELD','RELEASED'].includes(p.status)?'paid':'unpaid')+'"><strong>'+esc(paymentLabel(p))+'</strong></p>';
-  if(p.status==='PENDING'){
+  const paymentOrder=state.orders.find(order=>order.id===id),deadline=d.payment_deadline||paymentOrder?.payment_deadline;
+  const deadlinePassed=deadline&&Date.parse(deadline)<=(orderSearchServerTime?orderSearchServerTime+(performance.now()-orderSearchReceivedAt):Date.now());
+  if(d.cancel_reason==='PAYMENT_TIMEOUT'||paymentOrder?.cancel_reason==='PAYMENT_TIMEOUT')content+='<div class="note warning">Pesanan dibatalkan otomatis karena Customer belum membayar dalam 5 menit.</div>';
+  if(p.status==='PENDING'&&!deadlinePassed){
    content+='<p>Batas bayar: '+esc(new Date(p.expires_at).toLocaleString('id-ID'))+'</p>';
    if(p.mode==='SIMULATION')content+='<div class="note">Ini invoice simulasi, bukan QRIS yang bisa dipindai. Tidak ada uang yang dipindahkan.</div>'+(customer?'<button class="button full" data-simulatepay="'+id+'">Simulasikan pembayaran berhasil</button>':'');
    else if(p.qr_url&&customer)content+='<img src="'+esc(p.qr_url)+'" alt="QRIS pembayaran pesanan" style="display:block;max-width:280px;width:100%;margin:20px auto;background:white;padding:12px"/><p class="small">Bayar sesuai nominal melalui aplikasi yang mendukung QRIS.</p>';
@@ -874,6 +899,7 @@ async function renderPaymentModal(id,refresh=false){
   if(['HELD','RELEASED'].includes(p.status))content+='<p>'+ (p.status==='HELD'?'Pembayaran terverifikasi. Dana ditahan sampai customer mengonfirmasi selesai.':'Pendapatan sudah tercatat dalam saldo tersedia penganjem.')+'</p>';
   content+='<div class="form-actions"><button class="button secondary" data-refreshpay="'+id+'">Cek status pembayaran</button></div>';
   root.innerHTML=modalWrap('Pembayaran pesanan',content);
+  if(deadline&&!deadlinePassed&&['CREATING','PENDING'].includes(p.status))paymentModalDeadlineTimer=setTimeout(()=>{if(state.modal?.which==='payment'&&state.modal.id===id)renderPaymentModal(id,true);},Math.max(1,Date.parse(deadline)-(orderSearchServerTime+(performance.now()-orderSearchReceivedAt)))+100);
   if(state.page==='orders')loadOrders();
  }catch(e){
   if(state.modal?.which==='payment'&&state.modal.id===id)root.innerHTML=modalWrap('Pembayaran pesanan','<p role="alert">'+esc(e.message)+'</p><button class="button secondary" data-refreshpay="'+esc(id)+'">Cek status pembayaran</button>');
@@ -1010,7 +1036,7 @@ function clearAccountSession(message){cleanupOrderChatReceipts();releaseOrderCha
 setInterval(async()=>{
  if(!state.user||document.hidden)return;
  try{const d=await get('/api/auth/me');if(!d.user&&state.user)clearAccountSession('Sesi berakhir. Silakan masuk kembali.');}catch{}
-},15000);
+},30000);
 
 document.addEventListener('change',e=>{
  if(e.target.id==='driver-report-scope'&&state.user?.role==='ADMIN'){
@@ -1102,10 +1128,10 @@ function dashboardPromoScene(){
   <mask id="scene-student-eyes" maskUnits="userSpaceOnUse" x="0" y="0" width="1536" height="1024"><g fill="white" filter="url(#scene-eyelid-feather)"><ellipse cx="863" cy="274" rx="17" ry="15"/><ellipse cx="900" cy="286" rx="16" ry="14"/></g></mask>
   <mask id="scene-shopper-eyes" maskUnits="userSpaceOnUse" x="0" y="0" width="1536" height="1024"><g fill="white" filter="url(#scene-eyelid-feather)"><ellipse cx="972" cy="329" rx="16" ry="14"/><ellipse cx="1009" cy="334" rx="16" ry="14"/></g></mask>
  </defs>
- <image href="/dashboard-promo-scene.png" width="1536" height="1024"/>
- <image class="promo-eye-blink blink-rider" href="/dashboard-promo-scene-blink.png" width="1536" height="1024" mask="url(#scene-rider-eyes)"/>
- <image class="promo-eye-blink blink-student" href="/dashboard-promo-scene-blink.png" width="1536" height="1024" mask="url(#scene-student-eyes)"/>
- <image class="promo-eye-blink blink-shopper" href="/dashboard-promo-scene-blink.png" width="1536" height="1024" mask="url(#scene-shopper-eyes)"/>
+ <image href="/dashboard-promo-scene.webp" width="1536" height="1024"/>
+ <image class="promo-eye-blink blink-rider" href="/dashboard-promo-scene-blink.webp" width="1536" height="1024" mask="url(#scene-rider-eyes)"/>
+ <image class="promo-eye-blink blink-student" href="/dashboard-promo-scene-blink.webp" width="1536" height="1024" mask="url(#scene-student-eyes)"/>
+ <image class="promo-eye-blink blink-shopper" href="/dashboard-promo-scene-blink.webp" width="1536" height="1024" mask="url(#scene-shopper-eyes)"/>
  </svg>`;
 }
 
@@ -1489,18 +1515,19 @@ async function confirmOrderChatDelivery(messages,owner=state.user?.id){
  const ids=messages.filter(message=>message.sender_id!==owner&&!message.delivered_at).map(message=>message.id);
  if(ids.length)await post('/api/account/order-chat/delivered',{message_ids:ids});
 }
-let orderInboxBusy=false;
+let orderInboxBusy=false,orderInboxLastCheck=0;
 async function pollOrderChatInbox(){
- if(orderInboxBusy||!['CUSTOMER','DRIVER'].includes(state.user?.role))return;
+ if(document.hidden||orderInboxBusy||!['CUSTOMER','DRIVER'].includes(state.user?.role))return;
+ const interval=state.modal?.which==='order-chat'?3000:15000;if(Date.now()-orderInboxLastCheck<interval)return;orderInboxLastCheck=Date.now();
  const owner=state.user.id;orderInboxBusy=true;
  try{
   const inbox=await get('/api/account/order-chat/inbox');if(state.user?.id!==owner)return;
   await confirmOrderChatDelivery(inbox.messages,owner);
-  if(inbox.has_more&&state.user?.id===owner)setTimeout(pollOrderChatInbox,0);
+  if(inbox.has_more&&state.user?.id===owner)setTimeout(()=>{orderInboxLastCheck=0;pollOrderChatInbox();},0);
  }catch{}finally{orderInboxBusy=false;}
 }
 setInterval(pollOrderChatInbox,3000);
-document.addEventListener('visibilitychange',()=>queueOrderReadReceipts());
+document.addEventListener('visibilitychange',()=>{queueOrderReadReceipts();if(!document.hidden){orderInboxLastCheck=0;pollOrderChatInbox();}});
 window.addEventListener('focus',()=>queueOrderReadReceipts());
 window.addEventListener('blur',()=>{if(state.modal)clearTimeout(state.modal.readReceiptTimer);});
 document.addEventListener('scroll',()=>queueOrderReadReceipts(),true);
@@ -1732,8 +1759,11 @@ let orderSearchTimer=null,orderSearchServerTime=0,orderSearchReceivedAt=0;
 const orderRetryPending=new Set();
 function searchSeconds(order){
  if(!order.search?.expires_at)return 0;
+ return countdownSeconds(order.search.expires_at);
+}
+function countdownSeconds(expires){
  const serverNow=orderSearchServerTime+(performance.now()-orderSearchReceivedAt);
- return Math.max(0,Math.ceil((Date.parse(order.search.expires_at)-serverNow)/1000));
+ return Math.max(0,Math.ceil((Date.parse(expires)-serverNow)/1000));
 }
 function orderSearchHtml(order){
  if(order.customer_id!==state.user?.id||order.status!=='OPEN'||!order.search)return '';
@@ -1741,6 +1771,7 @@ function orderSearchHtml(order){
  return `<section class="order-search ${expired?'is-expired':''}" data-order-search="${esc(order.id)}" aria-label="Pencarian Penganjem"><div class="order-search-heading"><strong>Mencari Penganjem</strong><span class="order-search-clock" role="timer" aria-live="off" aria-label="Sisa waktu mencari Penganjem">${otpClock(seconds)}</span></div><progress max="180" value="${seconds}" aria-label="Waktu pencarian tersisa"></progress><p data-search-message role="status">${expired?'Belum ada Penganjem yang menerima. Tekan Order Ulang untuk mencari lagi selama 3 menit.':'Kami sedang mencari Penganjem. Kamu bisa menunggu di halaman ini.'}</p><button type="button" class="button tiny" data-order-retry="${esc(order.id)}" ${expired?'':'hidden'} ${orderRetryPending.has(order.id)?'disabled':''}>Order Ulang</button></section>`;
 }
 function updateOrderSearchCountdown(){
+ updatePaymentWaitCountdown();
  if(state.page!=='orders'||!state.user){clearInterval(orderSearchTimer);orderSearchTimer=null;return;}
  for(const root of document.querySelectorAll('[data-order-search]')){
   const order=state.orders.find(o=>o.id===root.dataset.orderSearch);if(!order)continue;
@@ -1753,7 +1784,7 @@ function updateOrderSearchCountdown(){
 }
 function startOrderSearchCountdown(){
  clearInterval(orderSearchTimer);orderSearchTimer=null;updateOrderSearchCountdown();
- if(document.querySelector('[data-order-search]'))orderSearchTimer=setInterval(updateOrderSearchCountdown,1000);
+ if(document.querySelector('[data-order-search],[data-payment-wait]'))orderSearchTimer=setInterval(updateOrderSearchCountdown,1000);
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.user&&state.page==='orders')loadOrders();});
 document.addEventListener('click',async event=>{
@@ -1766,3 +1797,17 @@ document.addEventListener('click',async event=>{
  }catch(error){toast(error.message,true);}
  finally{orderRetryPending.delete(id);await loadOrders();}
 });
+
+function paymentWaitHtml(order){
+ if(order.cancel_reason==='PAYMENT_TIMEOUT')return '<p class="note warning payment-timeout-reason">Dibatalkan otomatis karena Customer belum membayar dalam 5 menit. Voucher dikembalikan jika ada.</p>';
+ if(!order.payment_wait||order.status!=='CLAIMED')return '';
+ return `<section class="order-search payment-wait" data-payment-wait="${esc(order.id)}"><div class="order-search-heading"><strong>Batas pembayaran Customer</strong><span role="timer" aria-live="off" aria-label="Sisa waktu pembayaran">${otpClock(countdownSeconds(order.payment_wait.expires_at))}</span></div><progress max="300" value="${countdownSeconds(order.payment_wait.expires_at)}" aria-label="Waktu pembayaran tersisa"></progress><p data-payment-wait-message>Customer memiliki 5 menit sejak Penganjem menerima pesanan. Jika belum dibayar, pesanan dibatalkan otomatis.</p></section>`;
+}
+function updatePaymentWaitCountdown(){
+ for(const root of document.querySelectorAll('[data-payment-wait]')){
+  const order=state.orders.find(o=>o.id===root.dataset.paymentWait);if(!order?.payment_wait)continue;
+  const seconds=countdownSeconds(order.payment_wait.expires_at);
+  root.querySelector('[role="timer"]').textContent=otpClock(seconds);root.querySelector('progress').value=seconds;
+  if(seconds===0)root.querySelector('[data-payment-wait-message]').textContent='Waktu pembayaran habis. Sistem sedang memeriksa pembayaran dan membatalkan pesanan yang belum dibayar.';
+ }
+}

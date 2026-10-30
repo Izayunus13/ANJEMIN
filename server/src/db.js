@@ -151,6 +151,15 @@ if(!db.prepare('PRAGMA table_info(service_orders)').all().some(c=>c.name==='sear
 }
 if(!db.prepare('PRAGMA table_info(service_orders)').all().some(c=>c.name==='search_attempt'))db.exec('ALTER TABLE service_orders ADD COLUMN search_attempt INTEGER NOT NULL DEFAULT 1 CHECK(search_attempt>0)');
 
+
+if(!db.prepare('PRAGMA table_info(service_orders)').all().some(c=>c.name==='payment_deadline')){
+ db.exec('ALTER TABLE service_orders ADD COLUMN payment_deadline TEXT');
+ db.prepare("UPDATE service_orders SET payment_deadline=? WHERE status='CLAIMED' AND payment_required=1 AND NOT EXISTS(SELECT 1 FROM payments p WHERE p.order_id=service_orders.id AND p.status IN ('HELD','RELEASED'))")
+  .run(new Date(Date.now()+300000).toISOString());
+}
+if(!db.prepare('PRAGMA table_info(service_orders)').all().some(c=>c.name==='cancel_reason'))db.exec('ALTER TABLE service_orders ADD COLUMN cancel_reason TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS idx_order_payment_deadline ON service_orders(status,payment_deadline)');
+
 // Stable short account numbers for existing and future users.
 db.exec(`
  CREATE TABLE IF NOT EXISTS user_numbers (
@@ -281,11 +290,11 @@ if(remoteDatabase)db.exec('BEGIN IMMEDIATE');
 try{
  const marker=remoteDatabase?db.prepare("SELECT to_regclass('_anjemin_schema_version') AS relation").get().relation:null;
  const current=marker?db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get()?.version:null;
- if(!remoteDatabase||current!==3){
+ if(!remoteDatabase||current!==4){
   initializeSchema();
   if(remoteDatabase){
    db.exec('CREATE TABLE IF NOT EXISTS _anjemin_schema_version(version INTEGER PRIMARY KEY)');
-   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(3);
+   db.prepare('INSERT INTO _anjemin_schema_version(version) VALUES(?) ON CONFLICT DO NOTHING').run(4);
   }
  }
  if(remoteDatabase)db.exec('COMMIT');

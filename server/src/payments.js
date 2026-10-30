@@ -37,14 +37,19 @@ export async function createPayment(o){
  const mode=paymentMode();
  if(mode==='DISABLED')throw apiError('Pembayaran QRIS belum diaktifkan.',503);
  if(mode.startsWith('MIDTRANS')&&!process.env.MIDTRANS_SERVER_KEY)throw apiError('Server key Midtrans belum dikonfigurasi.',503);
- const existing=paymentFor(o.id);if(existing)return existing;
+ o=db.prepare('SELECT * FROM service_orders WHERE id=?').get(o.id)||o;
+ const existing=paymentFor(o.id);
+ if(['HELD','RELEASED'].includes(existing?.status))return existing;
+ if(o.status!=='CLAIMED'||!o.driver_id||o.payment_deadline&&Date.parse(o.payment_deadline)<=Date.now())throw apiError('Batas pembayaran 5 menit sudah habis atau pesanan tidak aktif.',409);
+ if(existing)return existing;
+ const expires=o.payment_deadline||new Date(Date.now()+15*60000).toISOString();
  const id=crypto.randomUUID();
- db.prepare("INSERT INTO payments(id,order_id,mode,amount,status,expires_at) VALUES(?,?,?,?,?,?)").run(id,o.id,mode,o.fare-o.promo_discount,mode==='SIMULATION'?'PENDING':'CREATING',new Date(Date.now()+15*60000).toISOString());
+ db.prepare("INSERT INTO payments(id,order_id,mode,amount,status,expires_at) VALUES(?,?,?,?,?,?)").run(id,o.id,mode,o.fare-o.promo_discount,mode==='SIMULATION'?'PENDING':'CREATING',expires);
  const p=paymentFor(o.id);
  if(p.amount===0){settlePayment(id);return paymentFor(o.id);}
  if(mode==='SIMULATION')return p;
  // Reserve once before network IO. Reconcile uncertain results; never retry a charge.
- storeGatewayStatus(p,await gateway(mode,'/v2/charge',{payment_type:'qris',transaction_details:{order_id:id,gross_amount:p.amount},custom_expiry:{expiry_duration:15,unit:'minute'}}));
+ storeGatewayStatus(p,await gateway(mode,'/v2/charge',{payment_type:'qris',transaction_details:{order_id:id,gross_amount:p.amount},custom_expiry:{order_time:new Date(Date.now()+7*3600000).toISOString().slice(0,19).replace('T',' ')+' +0700',expiry_duration:Math.max(1,Math.floor((Date.parse(expires)-Date.now())/1000)),unit:'second'}}));
  return paymentFor(o.id);
 }
 export function storeGatewayStatus(p,data){

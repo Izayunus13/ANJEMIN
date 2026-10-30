@@ -322,3 +322,60 @@ for (const type of ['RIDE', 'JASTIP', 'DELIVERY']) {
     expect(errors).toEqual([]);
   });
 }
+
+for (const role of ['CUSTOMER', 'DRIVER']) {
+  test('unpaid accepted order cancels after five minutes while paid order remains active: ' + role, async ({ page }) => {
+    let now = Date.now(); const deadline = now + 300000;
+    const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+    await page.clock.install();
+    await page.route('**/api/**', route => {
+      const path = new URL(route.request().url()).pathname; let data: any = {};
+      if (path === '/api/config') data = { brand: 'ANJEMIN', mode: 'development', paymentMode: 'SIMULATION' };
+      else if (path === '/api/auth/me') data = { user: { id: role === 'CUSTOMER' ? 'customer' : 'driver', role, full_name: 'Pengguna Pembayaran', username: 'bayar', profile_complete: true, ready: false } };
+      else if (path === '/api/orders/mine') {
+        const timedOut = now >= deadline;
+        const base = { type: 'RIDE', customer_id: 'customer', driver_id: 'driver', pickup: 'Gerbang kampus', destination: 'Kos Melati', fare: 10000, platform_fee: 600, payment_required: 1, payment_deadline: new Date(deadline).toISOString() };
+        data = { server_time: new Date(now).toISOString(), orders: [
+          { ...base, id: 'unpaid-timeout', status: timedOut ? 'CANCELLED' : 'CLAIMED', cancel_reason: timedOut ? 'PAYMENT_TIMEOUT' : null, payment: { status: timedOut ? 'EXPIRED' : 'PENDING' }, payment_wait: timedOut ? null : { expires_at: base.payment_deadline } },
+          { ...base, id: 'paid-protected', status: 'CLAIMED', payment: { status: 'HELD' }, payment_wait: null },
+        ] };
+      } else if (path.includes('inbox')) data = { messages: [], has_more: false };
+      else if (path.includes('wallet')) data = { balance: 0, available_balance: 0, available: 0, held: 0, transactions: [] };
+      else if (path.includes('vouchers')) data = { vouchers: [] };
+      return route.fulfill({ json: data });
+    });
+    await page.goto('/'); await page.locator('.side-link[data-nav="orders"]').click();
+    await expect(page.locator('[data-payment-wait]')).toHaveCount(1);
+    await expect(page.locator('[data-payment-wait] [role="timer"]')).toHaveText('05:00');
+    now += 120000; await page.clock.fastForward(120000);
+    await expect(page.locator('[data-payment-wait] [role="timer"]')).toHaveText('03:00');
+    now += 180001; await page.clock.fastForward(180001);
+    await page.locator('[data-action="refresh-orders"]').click();
+    await expect(page.locator('[data-payment-wait]')).toHaveCount(0);
+    await expect(page.locator('.payment-timeout-reason')).toContainText('Customer belum membayar dalam 5 menit');
+    await expect(page.locator('#orders-results')).toContainText('Lunas');
+    await expect(page.locator('[data-payment="paid-protected"]')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+}
+
+test('slow order polling stays at one in-flight request', async ({ page }) => {
+  let requests = 0, release: (() => void) | undefined;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.clock.install();
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname; let data: any = {};
+    if (path === '/api/config') data = { brand: 'ANJEMIN', mode: 'development', paymentMode: 'SIMULATION' };
+    else if (path === '/api/auth/me') data = { user: { id: 'poll-customer', role: 'CUSTOMER', full_name: 'Pengguna Polling', username: 'poll', profile_complete: true } };
+    else if (path === '/api/orders/mine') { requests++; await held; data = { server_time: new Date().toISOString(), orders: [] }; }
+    else if (path.includes('inbox')) data = { messages: [], has_more: false };
+    else if (path.includes('vouchers')) data = { vouchers: [] };
+    await route.fulfill({ json: data });
+  });
+  await page.goto('/'); await page.locator('.side-link[data-nav="orders"]').click();
+  await expect.poll(() => requests).toBe(1);
+  await page.clock.fastForward(35000);
+  expect(requests).toBe(1);
+  release!();
+  await expect(page.locator('#orders-results')).toContainText('Belum ada order');
+});

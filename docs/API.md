@@ -97,3 +97,7 @@ Setiap pesan menyimpan `delivered_at` dan `read_at` dari waktu server. Satu cent
 - Hanya RIDE berstatus COMPLETED, pembayaran RELEASED, dan kredit saldo yang cocok dengan driver/pembayaran/mode yang dihitung. Pesanan sendiri, batal, belum dibayar, atau layanan lain tidak dihitung. Progres kumulatif, tanpa reset bulanan.
 - Klaim hanya aktif pada PAYMENT_MODE=SIMULATION dan bukan production. Bonus disimpan terpisah dari pendapatan pesanan dan saldo live, masuk riwayat `/api/driver/wallet` sebagai `kind: REWARD`, dan jumlahnya tersedia pada field `rewards`.
 - Statistik keuntungan Pengelola menampilkan reward yang diklaim sebagai biaya, mengikuti mode dan tanggal klaim dalam WIB. Reward mengurangi profit tanpa menambah jumlah atau nilai transaksi. Skema nominal ini merupakan konfigurasi uji; evaluasi terhadap komisi layanan 6% serta biaya operasional sebelum mengaktifkan reward nyata.
+
+## Batas pembayaran layanan
+
+Order CLAIMED yang belum lunas memiliki payment_deadline 5 menit sejak diterima dan payment_wait untuk countdown. Pembatalan otomatis mengisi cancel_reason=PAYMENT_TIMEOUT dan mengembalikan voucher. Invoice tidak mereset batas waktu. Lihat [detail verifikasi gateway dan scheduler](PAYMENT-TIMEOUT.md).

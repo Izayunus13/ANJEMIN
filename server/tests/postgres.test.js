@@ -51,7 +51,7 @@ test('PostgreSQL supports accounts, permissions, persistent private media, order
   assert.equal((await call('driver','/api/market/orders/'+reservation.data.item.order_id+'/payment',{})).status,409);
   assert.equal((await call('customer','/api/listings/'+listingId+'/complete',{order_id:reservation.data.item.order_id})).data.fee,0);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM ledger WHERE source_id=?').get(listingId).n,1);
-  assert.equal(db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get().version,3);
+  assert.equal(db.prepare('SELECT version FROM _anjemin_schema_version ORDER BY version DESC LIMIT 1').get().version,4);
   const file=saveImage(image,'private');
   db.prepare('UPDATE users SET ktm_path=? WHERE id=?').run(file,'driver');
   assert.equal(db.prepare('SELECT name FROM stored_files WHERE name=?').get(file).name,file);
@@ -87,6 +87,16 @@ test('PostgreSQL supports accounts, permissions, persistent private media, order
   assert.equal(wallet.data.available,9400);
   assert.equal((await call('admin','/api/admin/profits?mode=SIMULATION&period=ALL')).status,200);
   assert.equal((await call('driver','/api/driver/achievements')).status,200);
+  const timeoutOrder=await call('customer','/api/orders',{type:'RIDE',pickup:'Lokasi jemput',destination:'Lokasi tujuan',fare:10000});
+  assert.equal(timeoutOrder.status,200);
+  const timeoutId=timeoutOrder.data.order.id;
+  assert.equal((await call('driver','/api/orders/'+timeoutId+'/claim',{})).status,200);
+  assert.ok((await call('driver','/api/orders/mine')).data.orders.find(item=>item.id===timeoutId).payment_wait.remaining_seconds>0);
+  db.prepare("UPDATE service_orders SET payment_deadline='2000-01-01T00:00:00.000Z' WHERE id=?").run(timeoutId);
+  const expired=(await call('customer','/api/orders/mine')).data.orders.find(item=>item.id===timeoutId);
+  assert.equal(expired.status,'CANCELLED');assert.equal(expired.cancel_reason,'PAYMENT_TIMEOUT');
+  assert.equal((await call('customer','/api/orders/'+timeoutId+'/payment',{})).status,409);
+
   assert.equal((await call('customer','/api/auth/logout',{})).status,200);
   assert.equal((await call('customer','/api/auth/me')).data.user,null);
  }finally{
