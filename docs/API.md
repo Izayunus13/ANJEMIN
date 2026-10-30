@@ -31,7 +31,7 @@ Base URL lokal: `http://localhost:3000/api`. Semua POST mengirim body `Content-T
 | GET | `/chat` | Daftar chat user |
 | GET | `/chat/:id/messages` | Riwayat pesan dua pihak |
 | POST | `/chat/:id/messages` | `{body,offer_amount?}` |
-| GET | `/orders/mine` | Order milik customer atau driver |
+| GET | `/orders/mine` | Order milik customer/driver; `pickup_navigation: {url,source}` hanya untuk Penganjem penerima dengan order aktif dan pembayaran lunas, selainnya null |
 | POST | `/orders` | `{type,pickup,destination,fare,notes?,voucher_id?, ...}`; `type=DELIVERY` perlu `item_name,item_category,item_weight,image`; `type=JASTIP` perlu `item_name`, `place_id` opsional |
 | POST | `/orders/:id/cancel` | Customer batalkan saat OPEN, voucher dikembalikan |
 | GET | `/places?q=...&lat=...&lng=...` | Google Places Text Search & skor internal |

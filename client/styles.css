@@ -444,3 +444,5 @@ html.app-revealing #app,html.app-revealing #modal-root,html.app-revealing #toast
 .location-picker-map .leaflet-control-attribution{font-size:10px;max-width:54%;white-space:normal}
 
 .payment-qr{text-align:center;margin:18px 0}.payment-qr img{display:block;width:240px;max-width:100%;height:auto;margin:0 auto;background:white;border:12px solid white;border-radius:12px}#market-pending-listings .list-row{gap:12px;flex-wrap:wrap}
+
+.pickup-navigation{display:flex;flex-direction:column;gap:6px;max-width:240px}.pickup-navigation .button{align-self:flex-start}.pickup-navigation>span{font-size:10px;line-height:1.6}

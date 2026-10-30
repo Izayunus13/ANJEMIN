@@ -200,3 +200,65 @@ for (const [role, mode] of [['CUSTOMER', 'SIMULATION'], ['DRIVER', 'MIDTRANS_SAN
     expect(errors).toEqual([]);
   });
 }
+
+for (const role of ['DRIVER', 'CUSTOMER']) {
+  test('Rute Jemput only appears for paid active orders of the assigned driver: ' + role, async ({ page, context }) => {
+    let paid = false, delivered = false;
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const navigation = { url: 'https://www.google.com/maps/dir/?api=1&destination=-7.058%2C110.441&travelmode=two-wheeler&dir_action=navigate', source: 'GPS' };
+    const fixture = (id: string, overrides: any = {}) => ({
+      id, type: 'RIDE', vehicle_type: 'MOTOR', customer_id: 'customer', driver_id: 'driver', status: 'CLAIMED',
+      pickup: 'Gerbang kampus', destination: 'Kos Melati', fare: 10000, platform_fee: 600,
+      payment_required: 1, payment: { status: 'HELD', amount: 10000 },
+      pickup_navigation: navigation, ...overrides,
+    });
+    await context.route('https://www.google.com/maps/dir/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Maps navigation fixture</title>' }));
+    await page.route('**/api/**', route => {
+      const path = new URL(route.request().url()).pathname;
+      let data: any = {};
+      if (path === '/api/config') data = { brand: 'ANJEMIN', mode: 'development', paymentMode: 'SIMULATION' };
+      else if (path === '/api/auth/me') data = { user: { id: role === 'DRIVER' ? 'driver' : 'customer', role, username: 'route', full_name: 'Pengguna Rute', profile_complete: true, ready: false } };
+      else if (path === '/api/orders/mine') data = { orders: [
+        fixture('gps-order', { payment: { status: paid ? 'HELD' : 'PENDING' }, delivery_reported_at: delivered ? '2026-10-30 10:00:00' : null }),
+        fixture('address-order', { pickup_navigation: { url: 'https://www.google.com/maps/dir/?api=1&destination=Gerbang+kampus&travelmode=driving&dir_action=navigate', source: 'ADDRESS' } }),
+        fixture('finished-order', { status: 'COMPLETED', payment: { status: 'RELEASED' } }),
+        fixture('cancelled-order', { status: 'CANCELLED' }),
+        fixture('unclaimed-order', { status: 'OPEN', driver_id: null }),
+        fixture('another-driver', { driver_id: 'another-driver' }),
+        fixture('unpaid-legacy', { payment_required: 0, payment: null }),
+      ] };
+      else if (path.includes('inbox')) data = { messages: [], has_more: false };
+      else if (path.includes('wallet')) data = { balance: 0, available_balance: 0, available: 0, held: 0, transactions: [] };
+      else if (path.includes('vouchers')) data = { vouchers: [] };
+      else if (path.includes('orders') || path.includes('jobs')) data = { orders: [] };
+      return route.fulfill({ json: data });
+    });
+    await page.goto('/');
+    await page.locator('.side-link[data-nav="orders"]').click();
+    await expect(page.locator('[data-pickup-route]')).toHaveCount(role === 'DRIVER' ? 1 : 0);
+    paid = true;
+    await page.locator('[data-action="refresh-orders"]').click();
+    await expect(page.locator('[data-pickup-route]')).toHaveCount(role === 'DRIVER' ? 2 : 0);
+    if (role === 'DRIVER') {
+      const link = page.locator('[data-pickup-route="gps-order"]');
+      await expect(link).toContainText('Rute Jemput');
+      await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+      await expect(page.locator('[data-pickup-route="address-order"]').locator('..')).toContainText('Rute memakai alamat');
+      const [maps] = await Promise.all([context.waitForEvent('page'), link.click()]);
+      await maps.waitForLoadState();
+      const url = new URL(maps.url());
+      expect(url.origin).toBe('https://www.google.com');
+      expect(url.searchParams.get('destination')).toBe('-7.058,110.441');
+      expect(url.searchParams.get('dir_action')).toBe('navigate');
+      expect(url.searchParams.get('travelmode')).toBe('two-wheeler');
+      expect(url.searchParams.has('origin')).toBe(false);
+      await maps.close();
+      await expect(page.locator('#orders-results')).toBeVisible();
+    }
+    delivered = true;
+    await page.locator('[data-action="refresh-orders"]').click();
+    await expect(page.locator('[data-pickup-route="gps-order"]')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+}

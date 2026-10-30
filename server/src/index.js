@@ -15,6 +15,7 @@ import {LISTING_FEE,publishedListingSQL,listingFeeFor,isListingPublished,require
 import {verifyGatewaySignature} from './payments.js';
 import {withdrawalProviders,sellerBalance,sellerWithdrawals,withdrawMarketSimulation} from './market-withdrawals.js';
 import {identityFor,updateAccountProfile} from './account-profiles.js';
+import {pickupNavigation} from './pickup-navigation.js';
 import {orderMediaUsage,sendOrderChatMessage,orderChatMessages,loadOrderChatMedia,orderChatReceipts,pendingOrderChatInbox,acknowledgeOrderChat} from './order-chat.js';
 
 const root=path.resolve('client');
@@ -400,7 +401,13 @@ route('GET',/^\/api\/orders\/([\w-]+)\/media\/([\w.-]+)$/,async(req,res,m)=>{
 function orderView(u){return db.prepare(`SELECT o.*,cu.username customer_name,du.username driver_name FROM service_orders o
   JOIN users cu ON cu.id=o.customer_id LEFT JOIN users du ON du.id=o.driver_id
   WHERE o.customer_id=? OR o.driver_id=? ORDER BY o.created_at DESC LIMIT 80`).all(u.id,u.id);}
-route('GET',/^\/api\/orders\/mine$/,async(req,res)=>send(res,{orders:orderView(requireUser(req)).map(o=>({...o,payment:paymentFor(o.id),customer_profile:identityFor(o.customer_id),driver_profile:identityFor(o.driver_id)}))}));
+route('GET',/^\/api\/orders\/mine$/,async(req,res)=>{
+ const u=requireUser(req);
+ send(res,{orders:orderView(u).map(o=>{
+  const payment=paymentFor(o.id);
+  return {...o,payment,pickup_navigation:pickupNavigation(u,o,payment),customer_profile:identityFor(o.customer_id),driver_profile:identityFor(o.driver_id)};
+ })});
+});
 route('POST',/^\/api\/orders$/,async(req,res)=>{
  const u=requireRole(req,['CUSTOMER','DRIVER']);rateLimit('order-'+u.id,24,60);
  const b=await parseJson(req),type=String(b.type||'');if(!['RIDE','DELIVERY','JASTIP'].includes(type))throw apiError('Jenis layanan tidak tersedia.');

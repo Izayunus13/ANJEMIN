@@ -27,3 +27,13 @@ npm run test:e2e
 npm run build
 
 Pengujian browser memakai Leaflet asli dan tile SVG lokal yang diintersep, sehingga tidak membebani server tile komunitas. API akun/pesanan dan GPS pada pengujian pemilih lokasi menggunakan fixture; tidak membuat pesanan produksi. Skenario mencakup pembatalan, tap, geser pin, payload koordinat, alamat manual, Jastip, penolakan GPS, akurasi GPS, hasil GPS terlambat, dan tampilan seluler.
+
+## Rute Jemput untuk Penganjem
+
+Pada Riwayat pesanan, tombol opsional **Rute Jemput** muncul untuk Penganjem yang menerima pesanan ketika status pesanan CLAIMED, pembayaran HELD (lunas), dan pengantaran belum dilaporkan selesai. Customer, Penganjem lain, order belum dibayar, dibatalkan, serta selesai tidak memperoleh tautan navigasi dari API.
+
+Tombol membuka navigasi Google Maps di aplikasi yang terpasang atau tab browser. Tujuan memakai koordinat **pickup**, bukan koordinat antar. Maps memakai lokasi perangkat sebagai titik awal agar garis rute dan navigasi mengikuti GPS Penganjem; koordinat pengurutan jarak yang mungkin sudah lama tidak digunakan. Mode Motor/Barang/Jastip memakai two-wheeler dan Mobil memakai driving. Tujuan adalah titik jemput yang disimpan ketika Customer membuat pesanan, bukan pelacakan lokasi Customer secara langsung.
+
+Jika pin GPS tidak ada atau tidak valid, Maps memakai alamat jemput dan UI meminta Penganjem memastikan titik lewat chat. Jika izin lokasi tidak diberikan atau perangkat tidak mendukung navigasi langsung, Maps dapat menampilkan pratinjau rute dan meminta titik awal. Fitur tidak menandai pesanan selesai atau mengubah pembayaran.
+
+Tidak memerlukan API key atau backend routing baru. Lokasi tujuan dikirim ke Google hanya setelah Penganjem membuka tautan; lokasi perangkat dikelola oleh izin Google Maps. ANJEMIN tidak menambahkan penyimpanan perjalanan GPS. Referensi: [Google Maps URLs](https://developers.google.com/maps/documentation/urls/get-started).
